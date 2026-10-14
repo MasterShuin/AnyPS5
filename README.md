@@ -28,6 +28,33 @@ Per-game progress (stage reached, open blockers, libraries and GPU coverage) is 
 
 SDL-mapped game controllers are supported, including analog sticks and triggers. Keyboard and mouse controls can be configured with an `anyps5-input.ini` file. See [input mapping](docs/user/INPUT_MAPPING.md) for the supported devices and configuration format.
 
+## Windowed configuration UI
+
+The graphical front-end is built for non-technical users. Launch it with:
+
+```text
+python tools/ui_run.py
+```
+
+The main window has only what is needed: a **Scegli gioco** button (a file — `.pkg`/`.ffpfs`/`.ffpfsc`/`.exfat`/`.elf` — or a game folder with `eboot.bin`), the selected name, a **Converti gioco** button, a progress bar, and a final summary that is one of *Conversione completata*, *Conversione non riuscita*, or *Conversione completata, ma il gioco non è stato ancora verificato*. Two buttons follow the result: **Apri cartella risultato** and **Prova ad avviare il gioco** — the latter is enabled only when the import audit verifies the dependencies. Output goes to an `AnyPS5_Output` folder next to the input; the relinker, the native `libs/` and the output path are auto-detected, and every technical option (relinker path, libs path, GUI subsystem, copying app data, a detailed log) is hidden under an optional **Opzioni avanzate** section. The window is pure `tkinter` (standard library).
+
+The conversion runs the full pipeline ([`tools/build_windows_game.py`](tools/build_windows_game.py)) in a worker thread — extraction, preparation, Windows relinking and the dependency audit — and never reports a generated PE or a started process as a playable game. See [USAGE.md](docs/user/USAGE.md#windows-conversion-pipeline).
+
+You can also prefill the fields from an existing CLI invocation:
+
+```text
+python tools/ui_run.py input.pkg --executable eboot.bin --modules modules/
+```
+
+Importable API:
+
+```python
+from tools.ui_run import build_app, run_ui
+```
+
+`build_app()` returns a `tkinter.Tk` window; `run_ui(argv)` creates the window, optionally
+prefills it from CLI arguments, and runs the event loop.
+
 ## Disclaimer
 
 This project is intended for interoperability, research, preservation, and compatibility purposes. It does not include, distribute, or require copyrighted software, firmware, cryptographic keys, or proprietary libraries. Users are responsible for ensuring that any binaries used with this project are obtained and used in accordance with applicable laws and their respective license terms.

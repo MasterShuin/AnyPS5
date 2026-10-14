@@ -91,6 +91,45 @@ Use the generated files printed as `Guest module:` for bundled title modules. `l
 
 On Windows, a self-built `libs/` also needs `libgcc_s_seh-1.dll`, `libstdc++-6.dll` and `libwinpthread-1.dll` from the `mingw64/bin` directory of the toolchain that built the libraries; the release archives already contain them. The libraries are loaded without searching `PATH`, so a copy elsewhere on the system is not used, and a library that needs one of them fails with error 126 (the specified module could not be found) although its `.prx` file is present.
 
+## Windows conversion pipeline
+
+[`tools/build_windows_game.py`](../../tools/build_windows_game.py) drives a PS5 title from a container, game folder or ELF to a Windows run directory, then audits it. It is standard-library only and reusable from the CLI and from the beginner-friendly Tkinter UI (`python tools/ui_run.py`: **Scegli gioco** → **Converti gioco** → **Prova ad avviare il gioco**, with technical options hidden under *Opzioni avanzate*).
+
+```sh
+python tools/build_windows_game.py "path/to/game" -o "path/to/out"
+```
+
+The pipeline runs explicit phases and stops at the first failure, never reusing a stale or half-written output:
+
+1. **input_validated** — resolves the relinker (`--relinker`, else `build/core/relinker/relinker.exe`) and the native libraries (`--libs`, else `build/core/libs/libs`); refuses an output inside the input.
+2. **prepared** — extracts a container (via the `ps5-ultrapack` backend) and stages `eboot.bin`, `sce_sys/` and bundled modules with `prepare_run`.
+3. **pe_generated** — runs `relinker --windows --registry --rpath '$ORIGIN/libs'` (adding `--skip-sce-module` only when no bundled modules exist, and `--windows-gui` with `--windows-gui`). The result must be a PE (`MZ`).
+4. **libs_staged** — copies the native `*.prx` and the three MinGW runtime DLLs into `libs/`.
+5. **app0_staged** — copies the game payload into `app0/` (the relinker's converted modules already live in `app0/sce_module`; the original PS5 module directories are never copied there). `--copy-app-data` also copies the full game data.
+6. **audit_done** — runs `import_audit.py` and records `deps_verified` (exit 0) or `deps_incomplete` (exit 1).
+
+Output layout:
+
+```text
+out/
+    game.exe                 PE produced by the relinker
+    game.registry.json       import registry (one per converted module too)
+    libs/                    native *.prx + libgcc_s_seh-1.dll, libstdc++-6.dll, libwinpthread-1.dll
+    app0/                    game payload; sce_module/ holds the converted modules
+    audit.json               full import-audit result
+    conversion.log           captured stdout/stderr of every step
+    conversion_report.json   phase-by-phase outcome
+```
+
+`--launch` starts `game.exe` only after `deps_verified`. **A generated PE, a verified dependency set and a started process are three different things; none of them means the title renders, accepts input or is playable.** Prerequisites: build the relinker (`cmake --build build --target relinker`) and the libraries (`cmake --build build --target libs`); a `.pkg`/`.ffpfs` input also needs the bundled `ps5-ultrapack` container backend.
+
+### Progress, log and report in the windowed UI
+
+`python tools/ui_run.py` shows the conversion as it runs, not only at the end. `build()` accepts a `progress_callback` that the GUI registers so a progress bar and a current-phase line advance phase by phase (`input_validated` → `prepared` → `pe_generated` → `libs_staged` → `app0_staged` → `audit_done`), each labelled in plain Italian; a failed phase is marked with a ✖ instead of a ✔. The full pipeline log streams into the **Registro (log)** box under *Opzioni avanzate*.
+
+When the run ends — whether it succeeded, ended at `deps_incomplete` or failed — a **Resoconto** panel appears with the phase-by-phase outcome, the import-audit counts (implemented / stub / absent, plus any needed library without a file) and the complete log. Two buttons, **Copia log** and **Copia resoconto**, copy that text to the clipboard so the whole run can be pasted into a bug report; the copy buttons are enabled even on failure, because a failed run is exactly when the log matters most. The summary, the open-folder and try-to-launch buttons keep their usual meaning: a started process is still never reported as a playable game.
+
+
 On Windows, direct memory (`sceKernelAllocateDirectMemory`, up to 13824 MiB per title) is committed in full when the title allocates it, not when its pages are first used. The system commit limit (installed memory plus page file size, the second value of Committed in Task Manager) must cover it together with all other committed memory. Otherwise the allocation throws `create direct memory backing of 0x<n> bytes (<m> MiB)` with the Windows error; enlarge the page file or close other applications.
 
 On Linux, when the Vulkan driver imports dma-buf memory (not the NVIDIA proprietary driver), shared direct memory is imported through `/dev/udmabuf`, and the user who runs the game needs read-write access to it. Many distributions create it as `root:kvm` with mode `0660`: add the user to the `kvm` group and log in again (an ACL such as `setfacl -m u:$USER:rw /dev/udmabuf` lasts until the next reboot). Without access, startup prints `[gpu] open /dev/udmabuf: Permission denied`, these ranges are copied instead of imported, and GPU stores to them through FLAT/GLOBAL addresses fail with `BDA access failed`. Ranges above udmabuf's `size_limit_mb` (64 MiB by default) are copied as well.

@@ -1,0 +1,2 @@
+PFSBROWSE_ERROR: this image wraps a .exfat volume, not a PFS - browsing that format is not supported
+EXIT=0 
