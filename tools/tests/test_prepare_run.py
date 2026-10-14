@@ -178,6 +178,35 @@ class PrepareRunTests(unittest.TestCase):
         code = prepare_run.main([str(game), str(out), "--source", "nope.bin"])
         self.assertEqual(code, 2)
 
+    def test_loose_root_modules_are_staged(self):
+        """Third-party modules shipped loose in the game folder root (not in a
+        sce_module/ dir) are staged into sce_module so the relinker converts
+        them; otherwise game.exe cannot LoadLibrary them (GetLastError 126)."""
+        game = self.game_folder(modules=())
+        (game / "libcohtml.Prospero.prx").write_bytes(b"\x00" * 16)
+        (game / "libfmod.prx").write_bytes(b"\x00" * 16)
+        out = self.tmp / "run"
+
+        prepared = prepare_run.prepare_run(game, out, verbose=False)
+
+        self.assertEqual(prepared, out)
+        self.assertTrue((out / "sce_module" / "libcohtml.Prospero.prx").is_file())
+        self.assertTrue((out / "sce_module" / "libfmod.prx").is_file())
+        # The loose file is not left in the run root.
+        self.assertFalse((out / "libcohtml.Prospero.prx").exists())
+
+    def test_loose_root_module_does_not_override_dir_copy(self):
+        """When a module ships both inside sce_module/ and loose in the root,
+        the sce_module copy (the relinker's canonical location) wins."""
+        game = self.game_folder(modules=("sce_module",))
+        (game / "sce_module" / "libcohtml.Prospero.prx").write_bytes(b"dir-copy")
+        (game / "libcohtml.Prospero.prx").write_bytes(b"loose-copy")
+        out = self.tmp / "run"
+
+        prepare_run.prepare_run(game, out, verbose=False)
+
+        staged = (out / "sce_module" / "libcohtml.Prospero.prx").read_bytes()
+        self.assertEqual(staged, b"dir-copy")
 
     def test_defaults(self):
         self.assertEqual(prepare_run.DEFAULT_EXECUTABLE, "eboot.bin")

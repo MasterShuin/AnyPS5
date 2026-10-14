@@ -47,6 +47,10 @@ import self_elf  # noqa: E402
 #: Bundled-module directories, in the order the relinker honours them.
 _MODULE_DIRS = ("sce_module", "sce_modules", "prx")
 
+#: File suffixes of bundled modules that some titles ship loose in the game
+#: folder root (beside ``eboot.bin``) instead of inside a ``sce_module`` dir.
+_MODULE_SUFFIXES = (".prx", ".sprx")
+
 DEFAULT_EXECUTABLE = "eboot.bin"
 DEFAULT_SOURCE = "eboot.bin"
 
@@ -70,6 +74,44 @@ def discover_module_dirs(source_root: Path) -> list[Path]:
     root = source_root if source_root.is_dir() else source_root.parent
     return [root / name for name in _MODULE_DIRS if (root / name).is_dir()]
 
+
+def stage_loose_root_modules(game_folder: Path, output: Path, verbose: bool) -> list[Path]:
+    """Stage bundled modules that ship loose in the game folder root.
+
+    Not every title keeps its bundled modules inside a ``sce_module`` (or
+    ``sce_modules``/``prx``) directory: some ship third-party modules such as
+    ``libcohtml.Prospero.prx`` or ``libfmod.prx`` as plain files beside
+    ``eboot.bin``. Those are skipped by :func:`discover_module_dirs`, which
+    looks only for the module *directories*, so the relinker never sees them
+    and the generated ``game.exe`` fails to ``LoadLibrary`` them at runtime
+    (``GetLastError 126``).
+
+    Copy every loose ``*.prx``/``*.sprx`` from *game_folder* into the prepared
+    ``sce_module`` tree, unwrapping SELF to plain ELF exactly like the modules
+    found inside a module directory. A module that already exists in the
+    staged ``sce_module`` (i.e. the title ships it both loose and in the
+    directory) keeps the directory copy, which is the canonical location the
+    relinker already honours. Returns the staged module paths.
+    """
+    root = game_folder if game_folder.is_dir() else game_folder.parent
+    destination = output / _MODULE_DIRS[0]
+    staged: list[Path] = []
+    for module in sorted(root.iterdir()):
+        if not module.is_file() or module.suffix.lower() not in _MODULE_SUFFIXES:
+            continue
+        destination.mkdir(parents=True, exist_ok=True)
+        target = destination / module.name
+        if target.exists():
+            # The directory copy wins; do not overwrite it with the loose file.
+            continue
+        shutil.copy2(module, target)
+        if self_elf.convert_file(target) and verbose:
+            print(f"[prepare_run] {module.name}: SELF container -> plain ELF")
+        staged.append(target)
+    if staged and verbose:
+        print(f"[prepare_run] loose modules -> {destination}")
+    return staged
+
 def copy_executables_and_payload(
     executable_source: Path,
     game_folder: Path | None,
@@ -91,6 +133,13 @@ def copy_executables_and_payload(
         print(f"[prepare_run] executable -> {output / executable_name}")
     if self_elf.convert_file(output / executable_name) and verbose:
         print(f"[prepare_run] {executable_name}: SELF container -> plain ELF")
+    if game_folder is not None:
+        # Some titles ship bundled modules loose in the game folder root
+        # instead of inside a module directory; stage them too so the
+        # relinker converts them and game.exe can load them at runtime.
+        stage_loose_root_modules(game_folder, output, verbose)
+
+
 
     if game_folder is not None:
         sys_src = game_folder / "sce_sys"
