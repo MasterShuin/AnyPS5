@@ -26,7 +26,7 @@ void Driver::lookupDraw(const Submission& submission, const std::shared_ptr<Vulk
             mix(graphics.stages.tessellation.has_value());
             if (graphics.stages.tessellation) {
                 const auto& tess = *graphics.stages.tessellation;
-                for (const auto value : {tess.inputControlPoints, tess.outputControlPoints, tess.domain, tess.partitioning, tess.outputTopology}) mix(value);
+                for (const auto value : {tess.inputControlPoints, tess.outputControlPoints, tess.domain, tess.partitioning, tess.outputTopology, tess.patchesPerGroup, tess.primitiveGroupSize, static_cast<std::uint32_t>(tess.breakAtInstance)}) mix(value);
             }
             mix(graphics.rectList);
             mix(programs.size());
@@ -62,7 +62,7 @@ void Driver::lookupDraw(const Submission& submission, const std::shared_ptr<Vulk
             mix(pixel.interpolatorCount);
             for (std::uint32_t i = 0; i < pixel.interpolatorCount; ++i) mix(pixel.interpolatorSettings[i]);
             mix(pixel.inputAddr);
-            for (const bool flag : {pixel.wave32, pixel.hasPerspectiveCenterVgpr, pixel.perspectiveCentroid, pixel.posX, pixel.posY, pixel.posZ, pixel.posW, pixel.frontFace, pixel.ancillary, pixel.sampleShading, pixel.noPerspective, pixel.linearCentroid, pixel.pixelKillEnable, pixel.depthExportEnable, pixel.sampleMaskExportEnable, pixel.earlyZ, pixel.executeOnNoop}) mix(flag);
+            for (const bool flag : {pixel.wave32, pixel.hasPerspectiveCenterVgpr, pixel.perspectiveCentroid, pixel.posX, pixel.posY, pixel.posZ, pixel.posW, pixel.frontFace, pixel.frontFaceAllBits, pixel.ancillary, pixel.sampleShading, pixel.noPerspective, pixel.linearCentroid, pixel.pixelKillEnable, pixel.depthExportEnable, pixel.sampleMaskExportEnable, pixel.earlyZ, pixel.executeOnNoop}) mix(flag);
             mix(static_cast<std::uint64_t>(pixel.conservativeZExport));
             mix(pixel.orderedPixelShader);
             mix(pixel.stencilRefExportEnable);
@@ -72,6 +72,7 @@ void Driver::lookupDraw(const Submission& submission, const std::shared_ptr<Vulk
             mix(pixel.dualSourceBlend);
             mix(pixel.alphaToCoverage);
             mix(static_cast<std::uint64_t>(pixel.rasterPrimitive));
+            mix(pixel.ditheredAlphaToCoverage);
             std::lock_guard cacheLock(drawCacheMutex);
             ++drawEntryCounters.lookups;
             const auto found = drawCache.find(drawKey);

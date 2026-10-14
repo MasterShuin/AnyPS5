@@ -1,0 +1,12 @@
+downloading NID database to C:\Users\lupol\AppData\Local\Temp\anyps5-nid-db\aerolib.csv ...
+{
+ "db_entries": 159034,
+ "rows": [
+  {
+   "nid": "aeHxLWwq0gQ",
+   "stub": "<cli>",
+   "suggestion": "_ZTVN10__cxxabiv119__pointer_type_infoE",
+   "status": "already-implemented"
+  }
+ ]
+}

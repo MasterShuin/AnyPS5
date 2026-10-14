@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import tempfile
 import sys
 import unittest
 from pathlib import Path
@@ -54,6 +57,28 @@ class OpenPullRequestsTests(unittest.TestCase):
             7: {"ref": "refs/pr/7", "sha": "head-sha", "author": "contributor", "depends": set()},
         })
 
+    def test_collects_concatenated_json_pages_from_paginated_gh_output(self):
+        pull_requests = [
+            {"number": number, "user": {"login": f"author{number}"},
+             "head": {"sha": f"sha{number}"}, "body": None}
+            for number in range(1, 4)
+        ]
+        pages = [pull_requests[:2], pull_requests[2:]]
+        output = "\n".join(json.dumps(page) for page in pages)
+
+        with patch.object(pr_overlap, "REPO", "owner/project", create=True), \
+                patch.object(pr_overlap, "gh", return_value=output):
+            found = pr_overlap.open_prs("main")
+
+        self.assertEqual(set(found), {1, 2, 3})
+        self.assertEqual(found[3]["sha"], "sha3")
+
+    def test_rejects_empty_paginated_output(self):
+        with patch.object(pr_overlap, "REPO", "owner/project", create=True), \
+                patch.object(pr_overlap, "gh", return_value="  \n"):
+            with self.assertRaisesRegex(ValueError, "returned no JSON pages"):
+                pr_overlap.open_prs("main")
+
 
 class FetchTests(unittest.TestCase):
     def test_fetches_each_head_commit_the_api_reported(self):
@@ -84,6 +109,54 @@ class FetchTests(unittest.TestCase):
         self.assertEqual([len(call.args) - 4 for call in git.call_args_list], [100, 100, 51])
         self.assertEqual(git.call_args_list[0].args[4], "+refs/heads/main:refs/pr/base")
         self.assertEqual(git.call_args_list[-1].args[-1], "+00000000000000000000000000000000000000f9:refs/pr/249")
+
+
+class ConflictTests(unittest.TestCase):
+    def test_uses_the_shared_base_parent_without_newer_merge_tree_option(self):
+        first = {"tree": "first-tree", "files": {"shared.cpp"}, "added": set()}
+        second = {"tree": "second-tree", "files": {"shared.cpp"}, "added": set()}
+        with patch.object(pr_overlap, "merge", return_value=("merged-tree", set())) as merge:
+            self.assertEqual(pr_overlap.conflicts(first, second), {})
+        merge.assert_called_once_with("first-tree", "second-tree")
+
+
+class UnicodePathTests(unittest.TestCase):
+    def test_scans_and_reports_conflicts_with_git_path_quoting_enabled(self):
+        previous = os.getcwd()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", "-c", "user.name=Overlap Test", "-c", "user.email=test@example.com",
+                     "-c", "commit.gpgsign=false", *args], cwd=root,
+                    capture_output=True, text=True, encoding="utf-8", check=True).stdout.strip()
+
+            filename = "core/libs/prx/libSceExample/caf\u00e9.cpp"
+            source = root / filename
+            source.parent.mkdir(parents=True)
+            source.write_text("int value = 0;\n", encoding="utf-8")
+            git("init", "-q")
+            git("config", "core.quotePath", "true")
+            git("add", ".")
+            git("commit", "-qm", "test: create base")
+            base = git("rev-parse", "HEAD")
+            git("update-ref", "refs/pr/base", base)
+            for branch, value in (("left", 1), ("right", 2)):
+                git("checkout", "-qb", branch, base)
+                source.write_text(f"int value = {value};\n", encoding="utf-8")
+                git("add", ".")
+                git("commit", "-qm", "fix: change value")
+            try:
+                os.chdir(root)
+                left, right = {"ref": "left"}, {"ref": "right"}
+                pr_overlap.scan(left)
+                pr_overlap.scan(right)
+                self.assertEqual(left["files"], {filename})
+                self.assertEqual(right["files"], {filename})
+                self.assertEqual(pr_overlap.conflicts(left, right), {filename: [(1, 1)]})
+            finally:
+                os.chdir(previous)
 
 
 if __name__ == "__main__":

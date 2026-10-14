@@ -54,6 +54,7 @@ add_library(relinker_core STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/SyscallScanner.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/CallSiteResolver.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/CodeInstructionCollector.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/SceCodeExtent.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/UnusedNidFilter.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/UnusedNidFilter/StrictNidFilter.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/src/analysis/UnusedNidFilter/StrictReachability.cpp
@@ -87,6 +88,11 @@ if(BUILD_TESTING)
     set_tests_properties(relinker_conversion PROPERTIES TIMEOUT 20)
 endif()
 
+if(ANYPS5_BUILD_WASM)
+    target_compile_options(relinker_core PRIVATE -fexceptions)
+    add_subdirectory(wasm)
+endif()
+
 if(NOT ANYPS5_RELINKER_CLI)
     return()
 endif()
@@ -111,6 +117,9 @@ if(BUILD_TESTING AND WIN32)
 endif()
 
 if(WIN32)
+    add_library(relinker_resources OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/relinker.rc)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/relinker.rc PROPERTIES OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/relinker.manifest)
+    target_sources(relinker PRIVATE $<TARGET_OBJECTS:relinker_resources>)
     target_compile_options(relinker PRIVATE -municode)
     target_link_options(relinker PRIVATE -municode)
 endif()
@@ -377,8 +386,14 @@ if(BUILD_TESTING)
     if(Python3_Interpreter_FOUND)
         add_test(NAME cli_help COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/cli/tests/test_help.py $<TARGET_FILE:relinker>)
+        add_test(NAME windows_fixed_base COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_fixed_base.py $<TARGET_FILE:relinker>)
+        set_tests_properties(windows_fixed_base PROPERTIES TIMEOUT 20)
         add_test(NAME elf_offsets COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_elf_offsets.py $<TARGET_FILE:relinker>)
+        add_test(NAME conversion_diagnostics COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_conversion_diagnostics.py $<TARGET_FILE:relinker>)
+        set_tests_properties(conversion_diagnostics PROPERTIES TIMEOUT 20)
         add_test(NAME dynamic_segment COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_dynamic_segment.py $<TARGET_FILE:relinker>)
         add_test(NAME rela_size COMMAND ${Python3_EXECUTABLE}
@@ -418,8 +433,12 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_executable_segments.py $<TARGET_FILE:relinker>)
         add_test(NAME linux_executable_exports COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_linux_executable_exports.py $<TARGET_FILE:relinker>)
+        add_test(NAME executable_tls_relocations COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_executable_tls_relocations.py $<TARGET_FILE:relinker>)
         add_test(NAME linux_entry_argv COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_linux_entry_argv.py $<TARGET_FILE:relinker>)
+        add_test(NAME linux_fixed_base COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_linux_fixed_base.py $<TARGET_FILE:relinker>)
         add_test(NAME linux_program_header_order COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_linux_program_header_order.py $<TARGET_FILE:relinker>)
         add_test(NAME linux_input_program_headers COMMAND ${Python3_EXECUTABLE}
@@ -431,6 +450,8 @@ if(BUILD_TESTING)
         add_test(NAME windows_runpath COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_runpath.py $<TARGET_FILE:relinker>)
         set_tests_properties(windows_runpath PROPERTIES TIMEOUT 30)
+        add_test(NAME windows_trace_imports COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_trace_imports.py $<TARGET_FILE:relinker>)
         add_test(NAME windows_address_space COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_address_space.py $<TARGET_FILE:relinker>)
         add_test(NAME windows_tls_thread_pointer COMMAND ${Python3_EXECUTABLE}
@@ -463,6 +484,9 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_symbol_names.py $<TARGET_FILE:relinker>)
         add_test(NAME guest_registry COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_registry.py $<TARGET_FILE:relinker>)
+        add_test(NAME needed_libraries COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_needed_libraries.py $<TARGET_FILE:relinker>)
+        set_tests_properties(needed_libraries PROPERTIES TIMEOUT 30)
         add_test(NAME macos_output COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_macos_output.py $<TARGET_FILE:relinker>)
         add_test(NAME guest_host_libc COMMAND ${Python3_EXECUTABLE}
@@ -528,12 +552,19 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_input_magic.py $<TARGET_FILE:relinker>)
         add_test(NAME input_preservation COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_input_preservation.py $<TARGET_FILE:relinker>)
+        add_test(NAME output_collisions COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_output_collisions.py $<TARGET_FILE:relinker>)
+        add_test(NAME secondary_output_collisions COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_secondary_output_collisions.py $<TARGET_FILE:relinker>)
         add_test(NAME input_file COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_input_file.py $<TARGET_FILE:relinker>)
         add_test(NAME null_symbol_relocations COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_null_symbol_relocations.py $<TARGET_FILE:relinker>)
         add_test(NAME input_nonascii COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_input_nonascii.py $<TARGET_FILE:relinker>)
+        add_test(NAME long_paths COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_long_paths.py $<TARGET_FILE:relinker>)
+        set_tests_properties(long_paths PROPERTIES SKIP_RETURN_CODE 77)
         add_test(NAME string_table_bounds COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_string_table_bounds.py $<TARGET_FILE:relinker>)
         add_test(NAME sce_code_extent COMMAND ${Python3_EXECUTABLE}

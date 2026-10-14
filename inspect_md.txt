@@ -1,0 +1,25 @@
+container: C:\Users\lupol\Desktop\game\PPSA17221 Minecraft (01.044.000).ffpfsc exists=True
+detect_container='.ffpfsc'
+extracted to C:\PROGRAMMAZIONE\REPOSITORY\AnyPS5\_md_extract
+source: C:\PROGRAMMAZIONE\REPOSITORY\AnyPS5\_md_extract\MediaDecoders.Prospero.prx
+  raw size=0x132158 magic=b'T\x14\xf5\xee' is_self=True
+  --- raw header ---
+  not ELF, magic=b'T\x14\xf5\xee'
+  --- converted ELF size=0x13e0c8 (1302728) ---
+  type=0xfe18 phoff=0x40 phnum=14 phentsize=56 size=0x13e0c8 (1302728)
+    PHDR[0] type=0x00000001 off=0x4000 filesz=0xee5ee memsz=0xee5ee align=0x4000
+    PHDR[1] type=0x00000001 off=0xf4000 filesz=0x30d30 memsz=0x30d30 align=0x4000
+    PHDR[2] type=0x6474e550 off=0xf4000 filesz=0x3e24 memsz=0x3e24 align=0x4
+    PHDR[3] type=0x00000001 off=0x128000 filesz=0x40e8 memsz=0x8000 align=0x4000
+    PHDR[4] type=0x6474e552 off=0x128000 filesz=0x40e8 memsz=0x8000 align=0x1
+    PHDR[5] type=0x00000007 off=0x0 filesz=0x0 memsz=0x0 align=0x0
+    PHDR[6] type=0x61000002 off=0x12c0c8 filesz=0x20 memsz=0x20 align=0x8
+    PHDR[7] type=0x00000001 off=0x130000 filesz=0xa0 memsz=0x87d align=0x4000
+    PHDR[8] type=0x00000001 off=0x130880 filesz=0xd708 memsz=0xd708 align=0x4000
+    PHDR[9] type=0x00000004 off=0x13dd00 filesz=0x24 memsz=0x24 align=0x4
+    PHDR[10] type=0x00000002 off=0x13dd28 filesz=0x260 memsz=0x260 align=0x8
+    PHDR[11] type=0x6fffff00 off=0x13df90 filesz=0x50 memsz=0x0 align=0x10
+    PHDR[12] type=0x6fffff01 off=0x13dfe0 filesz=0xe8 memsz=0xe8 align=0x1
+    PHDR[13] type=0x00000004 off=0x13e0c8 filesz=0x48 memsz=0x0 align=0x4  <== EXCEEDS (end=0x13e110 > size=0x13e0c8)
+  wrote C:\PROGRAMMAZIONE\REPOSITORY\AnyPS5\md_converted.elf
+DONE

@@ -4,6 +4,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/CreationMask.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/gcc/StackGuard.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/windows/CrashReport.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/windows/CallTrace.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/linux/DlIteratePhdr.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/macos/GuestImages.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Strings.cpp
@@ -47,6 +48,7 @@ target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/RealPath.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/CxxAbiSupport.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Threads.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/Backtrace.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/exception/Exports.cpp
 )
 
@@ -213,7 +215,7 @@ if(BUILD_TESTING)
     endif()
     add_test_executable(guest_libc_threads_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcThreads.cpp)
     target_include_directories(guest_libc_threads_tests PRIVATE ${LIBS_INCLUDE_DIR})
-    target_link_libraries(guest_libc_threads_tests PRIVATE libc)
+    target_link_libraries(guest_libc_threads_tests PRIVATE libc libkernel)
     configure_windows_unwind(guest_libc_threads_tests)
     add_test(NAME guest_libc_threads COMMAND guest_libc_threads_tests)
     set_tests_properties(guest_libc_threads PROPERTIES TIMEOUT 20)
@@ -411,6 +413,18 @@ if(BUILD_TESTING)
         set_tests_properties(guest_errors PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
+    if(WIN32)
+        add_test_executable(guest_call_trace_tests ${LIBS_INCLUDE_DIR}/tests/GuestCallTrace.cpp)
+        target_include_directories(guest_call_trace_tests PRIVATE ${LIBS_INCLUDE_DIR})
+        target_link_libraries(guest_call_trace_tests PRIVATE libc)
+        configure_windows_unwind(guest_call_trace_tests)
+        add_test(NAME guest_call_trace COMMAND guest_call_trace_tests)
+        add_test(NAME guest_call_trace_abort COMMAND guest_call_trace_tests abort)
+        set_tests_properties(guest_call_trace guest_call_trace_abort PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+        set_tests_properties(guest_call_trace_abort PROPERTIES TIMEOUT 20 PASS_REGULAR_EXPRESSION
+            "last traced system library calls[^~]*#1 thread [0-9]+ libTraced.prx Integers from [^~]*guest_call_trace_tests.exe[^~]*#2 thread [0-9]+ libOther.prx Blocks from[^~]*most called traced imports \\(2 calls in total\\):[^~]* 1 libTraced.prx Integers[^~]* 1 libOther.prx Blocks")
+    endif()
     add_test_executable(guest_syslog_tests ${LIBS_INCLUDE_DIR}/tests/GuestSyslog.cpp)
     target_include_directories(guest_syslog_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_syslog_tests PRIVATE libc)
@@ -442,6 +456,16 @@ if(BUILD_TESTING)
     target_include_directories(guest_new_handler_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_new_handler_tests PRIVATE libc)
     configure_windows_unwind(guest_new_handler_tests)
+    add_test_executable(guest_generic_category_tests ${LIBS_INCLUDE_DIR}/tests/GuestGenericCategory.cpp)
+    target_include_directories(guest_generic_category_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_generic_category_tests PRIVATE libc)
+    configure_windows_unwind(guest_generic_category_tests)
+    add_test(NAME guest_generic_category COMMAND guest_generic_category_tests)
+    set_tests_properties(guest_generic_category PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_generic_category PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
     add_test(NAME guest_new_handler COMMAND guest_new_handler_tests)
     if(WIN32)
         set_tests_properties(guest_new_handler PROPERTIES ENVIRONMENT_MODIFICATION
@@ -519,6 +543,11 @@ if(BUILD_TESTING)
         target_include_directories(guest_exit_order_tests PRIVATE ${LIBS_INCLUDE_DIR})
         target_link_libraries(guest_exit_order_tests PRIVATE libc)
         add_test(NAME guest_exit_order COMMAND guest_exit_order_tests)
+        add_test_executable(guest_path_lifetime_tests ${LIBS_INCLUDE_DIR}/tests/GuestPathLifetime.cpp)
+        target_include_directories(guest_path_lifetime_tests PRIVATE ${LIBS_INCLUDE_DIR})
+        target_link_libraries(guest_path_lifetime_tests PRIVATE libc)
+        add_test(NAME guest_path_lifetime COMMAND guest_path_lifetime_tests)
+        set_tests_properties(guest_path_lifetime PROPERTIES TIMEOUT 20)
         if(NOT APPLE)
             enable_language(C)
             add_test_executable(exception_c_cleanup_tests ${LIBS_INCLUDE_DIR}/tests/ExceptionCCleanup.cpp ${LIBS_INCLUDE_DIR}/tests/ExceptionCCleanup.c)
@@ -561,6 +590,16 @@ if(BUILD_TESTING)
         set_tests_properties(application_heap_replacement application_heap_invalid_metadata application_heap_default application_heap_exit_order
             PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
+    add_test_executable(guest_allocator_failures_tests ${LIBS_INCLUDE_DIR}/tests/GuestAllocatorFailures.cpp)
+    target_include_directories(guest_allocator_failures_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_allocator_failures_tests PRIVATE libc)
+    configure_windows_unwind(guest_allocator_failures_tests)
+    add_test(NAME guest_allocator_failures COMMAND guest_allocator_failures_tests)
+    set_tests_properties(guest_allocator_failures PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(guest_allocator_failures PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
     add_test_executable(application_heap_stats_tests ${LIBS_INCLUDE_DIR}/tests/ApplicationHeapStats.cpp)
     target_include_directories(application_heap_stats_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(application_heap_stats_tests PRIVATE libc)
@@ -582,9 +621,13 @@ if(BUILD_TESTING)
     target_link_libraries(log_macros_tests PRIVATE libc)
     configure_windows_unwind(log_macros_tests)
     add_test(NAME log_macros COMMAND log_macros_tests)
+    add_test(NAME log_macros_timestamps COMMAND log_macros_tests timestamps)
     if(WIN32)
-        set_tests_properties(log_macros PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(log_macros log_macros_timestamps PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+        add_test_executable(thread_name_tests ${LIBS_INCLUDE_DIR}/tests/ThreadName.cpp)
+        target_include_directories(thread_name_tests PRIVATE ${LIBS_INCLUDE_DIR})
+        add_test(NAME thread_name COMMAND thread_name_tests)
     endif()
 
     add_test_executable(guest_heap_report_for_game_tests ${LIBS_INCLUDE_DIR}/tests/GuestHeapReportForGame.cpp)

@@ -1,0 +1,5 @@
+=== nid tool files === 
+nid_names.py
+nid_names.py
+=== nid data/cache === 
+c:\PROGRAMMAZIONE\REPOSITORY\AnyPS5\nid_check.txt
