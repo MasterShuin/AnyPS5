@@ -153,7 +153,7 @@ def elf_program_dynamic_symbols(path, data):
 
 def elf_exports(path, data):
     header = unpack("<16sHHIQQQIHHHHHH", data, 0, path, "ELF header")
-    if not header[6]:
+    if not header[6] or header[6] >= len(data):
         return elf_program_dynamic_symbols(path, data)[1]
     sections = elf_sections(path, data)
     names = set()
@@ -188,7 +188,7 @@ def elf_exports(path, data):
 
 def elf_imports(path, data):
     header = unpack("<16sHHIQQQIHHHHHH", data, 0, path, "ELF header")
-    if not header[6]:
+    if not header[6] or header[6] >= len(data):
         imports, _, needed = elf_program_dynamic_symbols(path, data)
         return imports, needed
     sections = elf_sections(path, data)
@@ -327,12 +327,23 @@ def built_libraries(directories):
     return {name: sorted(files) for name, files in exports.items()}, libraries
 
 
+def module_files(directory):
+    for file in directory_files(directory, "*"):
+        with file.open("rb") as handle:
+            magic = handle.read(4)
+        if magic == b"\x7fELF":
+            yield file
+        elif (file.suffix.lower() in (".prx", ".sprx", ".suprx", ".debug_prx", ".elf")
+              or magic.startswith(b"MZ") or magic in (b"\x4f\x15\x3d\x1d", b"\x54\x14\xf5\xee")):
+            raise AuditError(f"{file}: expected ELF module (first bytes {magic!r})")
+
+
 def read_modules(directories):
     imports = {}
     exports = defaultdict(set)
     images = {}
     for directory in directories:
-        for file in directory_files(directory, "*"):
+        for file in module_files(directory):
             data = file.read_bytes()
             if data[:2] == b"MZ":
                 raise AuditError(
@@ -524,9 +535,12 @@ def write_json(path, result):
 def git_stamp(source=ROOT):
     try:
         commit = subprocess.run(["git", "-C", str(source), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
-        dirty = bool(subprocess.run(["git", "-C", str(source), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout.strip())
     except (OSError, subprocess.CalledProcessError):
         return None, None
+    try:
+        dirty = bool(subprocess.run(["git", "-C", str(source), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout.strip())
+    except (OSError, subprocess.CalledProcessError):
+        dirty = None
     return commit, dirty
 
 

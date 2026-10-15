@@ -41,7 +41,7 @@ ConvertedExecutable Convert(const Cli::Args& args, const std::string& inputPath,
     input.InputPath = std::filesystem::absolute(Io::NativePath(inputPath)).lexically_normal();
     input.OutputPath = Io::NativePath(absPath);
     if (!args.skipSceModule) {
-        auto modules = Cli::ReadModules(input.InputPath, Io::NativePath(args.sceModulePath), args.excludedSceModules, args.moduleDirectories);
+        auto modules = Cli::ReadModules(std::filesystem::absolute(Io::NativePath(args.inputPath)).lexically_normal(), Io::NativePath(args.sceModulePath), args.excludedSceModules, args.moduleDirectories);
         input.ModuleRoot = std::move(modules.Root);
         input.Modules = std::move(modules.Modules);
         input.RuntimeDirectories = std::move(modules.RuntimeDirectories);
@@ -315,6 +315,11 @@ int Run(const int argc, char* argv[]) {
         }
         for (const auto& executable : executables) {
             fileWriter.Write(executable.OutputPath, executable.Bytes);
+            if (!args.toWindows) {
+                std::error_code error;
+                std::filesystem::permissions(Io::NativePath(executable.OutputPath), std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec, std::filesystem::perm_options::add, error);
+                if (error) throw Domain::RelinkerException("Cannot make the output executable: " + executable.OutputPath + " (" + error.message() + ")");
+            }
             progress.Report({Domain::ProgressStage::Write, absPath, ++written, outputCount});
         }
         if (args.writeRegistry) {
