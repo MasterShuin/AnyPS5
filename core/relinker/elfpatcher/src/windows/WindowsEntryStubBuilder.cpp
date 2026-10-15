@@ -139,6 +139,7 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
     std::vector<std::uint32_t> searchCounts;
     std::vector<bool> platformTlsResolvers;
     std::vector<bool> imported(libraries.size());
+    std::vector<bool> searchable(libraries.size());
     const bool unscopedImports = std::any_of(imports.begin(), imports.end(), [](const auto& import) { return import.Library.empty(); });
     for (const auto& import : imports) {
         std::vector<std::uint32_t> order;
@@ -168,12 +169,24 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
         platformTlsResolvers.push_back(std::none_of(order.begin(), order.end(), [&](auto index) {
             return index < guestModules.size() && !guestModules[index].UsePlatformTlsResolver;
         }));
+        if (!import.Library.empty())
+            for (const auto index : order) imported[index] = true;
+        if (hostModule) {
+            // Windows GetProcAddress only probes the module named by the import, so an import
+            // recorded against a library that does not export the symbol (library_mismatch) would
+            // not resolve even though another loaded host library provides it. Mirror Linux's global
+            // symbol scope: keep the declared modules first, then fall back to every host library.
+            // These extra entries are marked searchable rather than imported, so they are loaded
+            // through the optional probe path and an absent unused provider still loads gracefully.
+            for (std::size_t index = guestModules.size(); index < libraries.size(); ++index) {
+                const auto rva = CheckedRva(index);
+                searchable[index] = true;
+                if (std::find(order.begin(), order.end(), rva) == order.end()) order.push_back(rva);
+            }
+        }
         searchTables.push_back(CheckedRva(dataRva + data.size()));
         searchCounts.push_back(CheckedRva(order.size()));
-        for (const auto index : order) {
-            Io::AppendU32(data, index);
-            if (!import.Library.empty()) imported[index] = true;
-        }
+        for (const auto index : order) Io::AppendU32(data, index);
     }
 
     const auto stem = [](const std::string& name) {
@@ -480,7 +493,7 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
     }
 
     for (std::size_t index = 0; index < libraries.size(); ++index) {
-        if (index >= guestModules.size() && !imported[index] && !unscopedImports) continue;
+        if (index >= guestModules.size() && !imported[index] && !searchable[index] && !unscopedImports) continue;
         if (absolutePath && index >= guestModules.size()) {
             code.Rip({0x48, 0x8d, 0x0d}, libraryPaths[index]);
         } else {
@@ -722,7 +735,7 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
             code.PatchBranch(branch, code.GetRva());
         writeString(searched, true);
         for (std::size_t index = 0; index < resolvedPaths.size(); ++index) {
-            if (index >= guestModules.size() && !imported[index] && !unscopedImports) continue;
+            if (index >= guestModules.size() && !imported[index] && !searchable[index] && !unscopedImports) continue;
             writeString(indent, true);
             writeString(resolvedPaths[index], true);
             writeString(newline, true);

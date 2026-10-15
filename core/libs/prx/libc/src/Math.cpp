@@ -229,6 +229,7 @@ std::int64_t APS5_VABI llround_nid_postfix(double x) { return RoundToInt64(x); }
 std::int64_t APS5_VABI llroundf_nid_postfix(float x) { return RoundToInt64(x); }
 std::int64_t APS5_VABI llroundl_nid_postfix(long double x) { return RoundToInt64(x); }
 int APS5_VABI __isfinitef_nid_postfix(float x) { return std::isfinite(x) ? 1 : 0; }
+int APS5_VABI __isfinitel_nid_postfix(long double x) { return std::isfinite(x) ? 1 : 0; }
 int APS5_VABI __isnormal_nid_postfix(double x) { return std::isnormal(x) ? 1 : 0; }
 int APS5_VABI __isnormalf_nid_postfix(float x) { return std::isnormal(x) ? 1 : 0; }
 int APS5_VABI __isinff_nid_postfix(float x) { return std::isinf(x) ? 1 : 0; }

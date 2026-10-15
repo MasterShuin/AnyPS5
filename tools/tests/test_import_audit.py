@@ -473,6 +473,7 @@ class ImportAuditTests(unittest.TestCase):
         self.assertEqual((code, out), (2, ""))
         self.assertIn("guest.prx", err)
         self.assertIn("ELF", err)
+        self.assertIn("prepared/sce_module", err)
 
     def test_sectionless_module_imports_and_exports_are_audited(self):
         work = self.work

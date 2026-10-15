@@ -406,21 +406,28 @@ def stage_app0_phase(
 
 
 def audit_phase(
-    config: PipelineConfig, libs: Path, output: Path, log: list, runner: Runner = _run
+    config: PipelineConfig, libs: Path, output: Path, prepared: Path | None, log: list, runner: Runner = _run
 ) -> tuple:
     """Run ``import_audit.py`` and return ``(audit_dict, ready)``.
 
     Semantics verified against the auditor source: exit 0 = nothing blocks
     loading; exit 1 = ``absent`` imports or needed libraries without a file;
     exit 2 = an input could not be read. Only exit 0 sets ``ready``.
+
+    ``--modules`` receives the *source* ELF modules staged under *prepared*,
+    never the converted copies the relinker wrote to ``app0/sce_module``: those
+    are PE (``*.guest.prx``) and the auditor reads ELF dynamic tables, so
+    passing them fails with ``unsupported ELF version``. The file names must
+    also match the registries' library names (``libcohtml.Prospero.prx``, with
+    no ``.guest`` suffix), which only the originals satisfy.
     """
     registries = sorted(output.glob("*.registry.json"))
     if not registries:
         raise PipelineError(Phase.AUDIT_DONE, "no registry was produced by the relinker")
     cmd = [sys.executable, str(IMPORT_AUDIT), *[str(r) for r in registries], "--libs", str(libs)]
-    modules_dir = output / "app0" / "sce_module"
-    if modules_dir.is_dir() and any(modules_dir.iterdir()):
-        cmd += ["--modules", str(modules_dir)]
+    for module_dir in _module_dirs_present(prepared) if prepared else []:
+        if any(module_dir.iterdir()):
+            cmd += ["--modules", str(module_dir)]
     audit_json = output / "audit.json"
     cmd += ["--json", str(audit_json)]
     try:
@@ -503,7 +510,7 @@ def build(config: PipelineConfig, runner: Runner = _run,
         stage_app0_phase(config, prepared, game_folder, config.output, log)
         record(Phase.APP0_STAGED, True, str(config.output / "app0"))
 
-        audit, ready = audit_phase(config, libs, config.output, log, runner)
+        audit, ready = audit_phase(config, libs, config.output, prepared, log, runner)
         result.audit = audit
         record(Phase.AUDIT_DONE, True, "import audit completed")
         record(Phase.DEPS_VERIFIED if ready else Phase.DEPS_INCOMPLETE, ready,

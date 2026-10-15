@@ -334,6 +334,12 @@ def read_modules(directories):
     for directory in directories:
         for file in directory_files(directory, "*"):
             data = file.read_bytes()
+            if data[:2] == b"MZ":
+                raise AuditError(
+                    f"{file}: is a converted Windows PE (*.guest.prx); "
+                    f"pass the source ELF module directory (prepared/sce_module), "
+                    f"not the converted copies under output app0/sce_module"
+                )
             digest = hashlib.sha256(data).digest()
             if file.name in images:
                 previous, fingerprint = images[file.name]

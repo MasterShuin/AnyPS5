@@ -262,6 +262,61 @@ class BuildWindowsGameTests(unittest.TestCase):
         self.assertEqual(result.reached, bwg.Phase.AUDIT_DONE.value)
         self.assertIn("import audit", result.error)
 
+    def test_audit_modules_points_at_source_elf_not_converted_pe(self):
+        """``--modules`` must be the staged source ELF modules, never the output PE.
+
+        The relinker rewrites each bundled module to a PE copy under
+        ``app0/sce_module`` (``*.guest.prx``). ``import_audit`` parses
+        ``--modules`` as ELF -- and its file names must match the registries'
+        library names (``lib.prx``, without ``.guest``) -- so handing it the
+        converted copies aborts the whole audit with ``unsupported ELF version``
+        (exit 2) and ``deps_verified`` is never reached.
+        """
+        def prepare_with_modules(staged_from, prepared, *a, **k):
+            prepared = Path(prepared)
+            (prepared / "sce_sys").mkdir(parents=True, exist_ok=True)
+            (prepared / "sce_sys" / "param.json").write_text("{}")
+            (prepared / "eboot.bin").write_bytes(b"\x7fELF")
+            (prepared / "sce_module").mkdir()
+            (prepared / "sce_module" / "lib.prx").write_bytes(b"\x7fELF")
+            return prepared
+
+        output = self.tmp / "out"
+        scripted = ScriptedRunner()
+        audited_contents = {}
+
+        def runner(cmd, timeout=None):
+            # Like the real relinker, drop the *converted* PE modules in place.
+            args = [str(a) for a in cmd]
+            if any("import_audit.py" in a for a in args):
+                # Snapshot what the auditor is really pointed at (the staging
+                # tree is deleted again once build() returns).
+                for i, arg in enumerate(args):
+                    if arg == "--modules":
+                        audited_contents["dir"] = args[i + 1]
+                        audited_contents["files"] = sorted(
+                            p.name for p in Path(args[i + 1]).iterdir()
+                        )
+            else:
+                guest = output / "app0" / "sce_module"
+                guest.mkdir(parents=True, exist_ok=True)
+                (guest / "lib.prx.guest.prx").write_bytes(b"MZ" + b"\x00" * 10)
+            return scripted(args, timeout)
+
+        with mock.patch.object(bwg._prepare, "prepare_run", prepare_with_modules):
+            source = self.game_folder("game", with_modules=True)
+            result = bwg.build(self.config_for(source, output), runner=runner)
+        self.assertIsNone(result.error)
+        self.assertTrue(scripted.audit_cmds, "the import audit was never invoked")
+        audit_cmd = scripted.audit_cmds[0]
+        module_dirs = [audit_cmd[i + 1] for i, arg in enumerate(audit_cmd) if arg == "--modules"]
+        self.assertEqual(len(module_dirs), 1, audit_cmd)
+        audited = Path(module_dirs[0])
+        self.assertEqual(audited.name, "sce_module")
+        self.assertNotEqual(audited, output / "app0" / "sce_module")
+        # The source ELF (no .guest suffix) was audited, not the converted PE.
+        self.assertEqual(audited_contents.get("files"), ["lib.prx"])
+
     def test_stale_output_is_replaced(self):
         source = self.game_folder("game")
         output = self.tmp / "out"

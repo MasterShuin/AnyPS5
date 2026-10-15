@@ -196,4 +196,48 @@ void APS5_VABI _ZNSt8ios_base7_AddstdEPS__nid_postfix(void*) {
     NotImplemented_nid_no_patch(__func__);
 }
 
+int APS5_VABI _ZNSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE2idE_nid_postfix() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI _ZTVSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE_nid_postfix() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI _ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE3getES3_S3_RSt8ios_baseRNSt5_IosbIiE8_IostateEP2tmPKcSE__nid_postfix() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI _ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE2idE_nid_postfix() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI _ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE7_GetcatEPPKNSt6locale5facetEPKS5__nid_postfix() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+int APS5_VABI _Thrd_id_nid_postfix() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
+void APS5_VABI _ZNSt12future_errorD1Ev_nid_postfix(void* self) noexcept {
+    NotImplemented_nid_no_patch(__func__);
+}
+
+const char* APS5_VABI _ZNKSt13__sce_cxxvers16_Error_exception4whatEv_nid_postfix(const void* self) noexcept {
+    NotImplemented_nid_no_patch(__func__);
+    return "";
+}
+
+[[noreturn]] void APS5_VABI _ZSt26__throw_bad_variant_accessv_nid_postfix() {
+    NotImplemented_nid_no_patch(__func__);
+    throw std::runtime_error("__throw_bad_variant_access");
+}
+
 }
