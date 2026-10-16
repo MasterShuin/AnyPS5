@@ -87,6 +87,28 @@ class InputRowsTests(unittest.TestCase):
                     hw_oracle.run("s_nop 0", [row], **MODES)
                 assemble.assert_not_called()
 
+    def test_cli_rejects_empty_rows_before_running_tools(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            body, rows = Path(tmp) / "body.s", Path(tmp) / "rows.txt"
+            body.write_text("s_nop 0", encoding="utf-8")
+            argv = ["hw_oracle.py", str(body), str(rows), "--json"]
+            argv += [part for name, value in MODES.items()
+                     for part in ["--" + name.replace("_", "-"), str(value)]]
+            for contents in ("", "\n \t\n"):
+                with self.subTest(contents=contents):
+                    rows.write_text(contents, encoding="utf-8")
+                    with patch("sys.argv", argv), patch.object(hw_oracle, "run", return_value=[]) as run, \
+                            patch.object(hw_oracle, "target", return_value="gfx1030") as target, \
+                            contextlib.redirect_stdout(io.StringIO()) as output, \
+                            contextlib.redirect_stderr(io.StringIO()) as errors, \
+                            self.assertRaises(SystemExit) as exited:
+                        hw_oracle.main()
+                    self.assertEqual(exited.exception.code, 2)
+                    self.assertIn("at least one input row", errors.getvalue())
+                    self.assertEqual(output.getvalue(), "")
+                    run.assert_not_called()
+                    target.assert_not_called()
+
     def test_unsigned_bits_and_indexable_values_are_preserved(self):
         class Indexable:
             def __index__(self):

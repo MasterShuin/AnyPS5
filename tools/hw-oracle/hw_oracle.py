@@ -152,6 +152,8 @@ def main():
     parser.add_argument("--json", action="store_true", help="emit inputs, results and run settings as JSON; target is the assembly target, not a GPU model or driver")
     args = parser.parse_args()
     rows = [tuple(parse_word(v) for v in line.split()) for line in args.rows.read_text().splitlines() if line.strip()]
+    if not rows:
+        parser.error("rows file must contain at least one input row")
     if any(len(r) != 4 for r in rows):
         sys.exit("every row needs 4 values")
     extra = args.extra.read_bytes() if args.extra else b""
