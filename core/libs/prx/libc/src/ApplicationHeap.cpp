@@ -54,7 +54,8 @@ int APS5_VABI defaultPosixAlign(void** pointer, std::size_t alignment, std::size
 std::array<void*, 10> defaultApi() {
     return {reinterpret_cast<void*>(defaultAllocate), reinterpret_cast<void*>(defaultFree),
         reinterpret_cast<void*>(defaultCalloc), reinterpret_cast<void*>(defaultReallocate),
-        reinterpret_cast<void*>(defaultAlign), nullptr, reinterpret_cast<void*>(defaultPosixAlign)};
+        reinterpret_cast<void*>(defaultAlign), reinterpret_cast<void*>(defaultRealign),
+        reinterpret_cast<void*>(defaultPosixAlign)};
 }
 
 class CallbackScope {

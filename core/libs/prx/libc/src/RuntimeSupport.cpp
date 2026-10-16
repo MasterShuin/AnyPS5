@@ -221,9 +221,8 @@ int APS5_VABI _ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE7_Get
     return 0;
 }
 
-int APS5_VABI _Thrd_id_nid_postfix() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI _Thrd_id_nid_postfix(void) {
+    return static_cast<int>(GetCurrentThreadId());
 }
 
 void APS5_VABI _ZNSt12future_errorD1Ev_nid_postfix(void* self) noexcept {

@@ -151,6 +151,7 @@ _PHASE_LABELS = {
     "libs_staged": "Copia delle librerie di sistema",
     "app0_staged": "Copia dei dati di gioco",
     "audit_done": "Verifica delle dipendenze (audit)",
+    "exports_patched": "Aggiunta delle esportazioni mancanti e re-audit",
     "deps_verified": "Dipendenze verificate",
     "deps_incomplete": "Dipendenze incomplete",
     "error": "Errore",
@@ -458,9 +459,9 @@ class RunConfigApp(tkinter.Tk):
     def _on_phase(self, phase, ok, detail):
         """UI-thread handler for a completed phase (dispatched via ``self.after``)."""
         self.phase_var.set(phase_label(phase, ok))
-        # Deterministic advancement across the six ordered phases the build drives.
+        # Deterministic advancement across the ordered phases the build drives.
         order = ["input_validated", "prepared", "pe_generated",
-                 "libs_staged", "app0_staged", "audit_done"]
+                 "libs_staged", "app0_staged", "audit_done", "exports_patched"]
         if phase in order:
             self.progress.config(value=(order.index(phase) + 1) * 100 // len(order))
         line = phase_label(phase, ok)

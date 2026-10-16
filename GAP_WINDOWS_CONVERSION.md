@@ -1,7 +1,7 @@
 # AnyPS5 Windows Conversion — Gap Analysis & Resolution Plan
 
-**Date:** 2026-10-15
-**Source branch:** `features/user_interface` (HEAD: 978a79f62)
+**Date:** 2026-10-15 (last updated 2026-10-16)
+**Source branch:** `features/user_interface`
 **Output directory:** `C:\Users\lupol\Desktop\game\AnyPS5_Output`
 **Conversion report:** `C:\Users\lupol\Desktop\game\AnyPS5_Output\conversion_report.json`
 **Audit report:** `C:\Users\lupol\Desktop\game\AnyPS5_Output\audit.json`
@@ -9,7 +9,36 @@
 
 ---
 
-## 1. Summary of the Block
+## 0. Status update (2026-10-16)
+
+The two root causes found on 2026-10-15 are fixed and the fix is now part of
+the pipeline itself (phase `exports_patched`, see
+[`docs/user/USAGE.md`](docs/user/USAGE.md)):
+
+| Gap | Resolution |
+|---|---|
+| 10 × `library_mismatch` | `game.registry.json` corrected: the 10 NIDs are declared against the library that really exports them. |
+| 104 × `absent` from `libc.prx` (C++ STL) + 26 historical | New tool `tools/prx_export_patch.py`: appends an `.expd` section to the staged `.prx` with a complete export directory (old + new names → shared `xor eax,eax; ret` stub), ASCII-sorted name table, ordinals = EAT indexes. Verified with the real loader: `LoadLibraryExW` + `GetProcAddress` resolve every injected NID on the staged `libc.prx` (1354 exports; `load_test_out.txt`). |
+| 151 `module`-declared imports and the three title libraries (`libcohtml.Prospero.prx`, `libfmod.prx`, `libPlayFabMultiplayer.prx`) missing from the audit's `--libs` | The relinker already converts them to `app0/sce_module/<name>.guest.prx`; the new `exports_patched` phase stages them into `libs/<name>.prx` (without ever overwriting a native system library) so both the audit and the Windows loader find them under the registries' names. |
+
+The deciding audit now runs against the **staged** `libs/` — the exact files
+the Windows loader reads — so `deps_verified` means what it says. On the last
+full run before this update the staged tree exported **every** NID the audit
+reported absent (104/104 `libc.prx`, 69/69 cohtml, 56/56 fmod, 26/26 PlayFab).
+
+Remaining known gaps (not blocking the load, listed for the record):
+
+- `stub` imports resolve at load time but throw when called (by design: they
+  surface the missing behaviour instead of crashing the loader).
+- The injected NIDs return **zero** (a stub, not the real behaviour); a title
+  that needs real C++ STL semantics may still misbehave at runtime.
+- One pre-existing `test_import_audit` failure on Windows
+  (`test_module_files_must_be_elf`, path-separator assertion) — unrelated to
+  this work.
+
+---
+
+## 1. Summary of the Block (2026-10-15 run, for the record)
 
 | Field | Value |
 |---|---|

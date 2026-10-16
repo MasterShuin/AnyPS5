@@ -10,7 +10,8 @@ never lets a stale or half-written output be mistaken for a finished one.
 Phases (see :class:`Phase`):
 
     input_validated -> prepared -> pe_generated -> libs_staged
-        -> app0_staged -> audit_done -> deps_verified | deps_incomplete
+        -> app0_staged -> audit_done -> exports_patched
+        -> deps_verified | deps_incomplete
 
 ``deps_verified`` means only what ``tools/import_audit.py`` proves: no import is
 ``absent`` and every needed library has a file. It does **not** mean the title
@@ -45,7 +46,9 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
+import import_audit  # noqa: E402
 import prepare_run as _prepare  # noqa: E402
+import prx_export_patch  # noqa: E402
 import ps5_container  # noqa: E402
 import self_elf  # noqa: E402
 
@@ -85,6 +88,7 @@ class Phase(str, Enum):
     LIBS_STAGED = "libs_staged"
     APP0_STAGED = "app0_staged"
     AUDIT_DONE = "audit_done"
+    EXPORTS_PATCHED = "exports_patched"
     DEPS_VERIFIED = "deps_verified"
     DEPS_INCOMPLETE = "deps_incomplete"
     LAUNCH_REQUESTED = "launch_requested"
@@ -448,6 +452,118 @@ def audit_phase(
     return audit, ready
 
 
+def exports_patched_phase(
+    config: PipelineConfig,
+    output: Path,
+    prepared: Path | None,
+    audit: dict,
+    first_ready: bool,
+    log: list,
+    runner: Runner = _run,
+) -> tuple:
+    """Complete the staged ``libs/`` and re-audit it; return ``(audit, ready)``.
+
+    The first audit runs against the pristine native libraries, which by design
+    lack both the title's own converted modules and the NIDs the title imports
+    from ``libc.prx`` that the native build does not export. This phase makes
+    the *staged* tree — the exact files the Windows loader will read — whole:
+
+    1. every converted module ``app0/sce_module/<name>.guest.prx`` is copied to
+       ``libs/<name>.prx`` so the loader finds the library the registries name;
+       an existing staged file (a native system library) is never overwritten;
+    2. every import the first audit reported ``absent`` is appended to the
+       export table of the staged library it names (``libc.prx`` when the
+       import declares no library), through :mod:`prx_export_patch`, which
+       keeps the original exports and points the new names at a stub that
+       returns zero instead of failing the load;
+    3. the import audit is re-run against the staged ``libs/`` and *its*
+       verdict decides ``deps_verified``.
+
+    Nothing here can make the verdict optimistic: the deciding audit reads the
+    same files the loader will. A first audit that already passed with nothing
+    to stage or patch skips the second run.
+    """
+    staged = output / "libs"
+    guest_dir = output / "app0" / "sce_module"
+    copied = 0
+    if guest_dir.is_dir():
+        for guest in sorted(guest_dir.glob("*.guest.prx")):
+            name = guest.name.removesuffix(".guest.prx")
+            if not name.endswith(".prx"):
+                name += ".prx"
+            target = staged / name
+            if target.exists():
+                continue
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(guest, target)
+            except OSError as error:
+                log.append(f"[exports] cannot stage {guest.name}: {error}")
+                continue
+            copied += 1
+    if copied:
+        log.append(f"[exports] staged {copied} converted title module(s) into {staged}")
+
+    # Index every import's declared library so an import read from a module's
+    # dynamic table (no library of its own) is still patched into the file the
+    # relinker's registry really binds it to. The ``module`` field of a record
+    # names the importer, never the provider, so it is not a patch target.
+    declared: dict = {}
+    absent: dict = {}
+    for record in (audit or {}).get("imports", ()):
+        if record.get("library"):
+            declared.setdefault(record["nid"], set()).add(record["library"])
+        if record.get("class") == "absent":
+            absent.setdefault(record["nid"], set()).add(record.get("library") or "")
+    patch_targets: dict = {}   # staged file -> NIDs to add there
+    unresolved = 0
+    for nid, owners in sorted(absent.items()):
+        libraries = {lib for lib in owners if lib} or declared.get(nid) or set()
+        if not libraries:
+            libraries = {"libc.prx"}   # universal fallback: the loader may bind it there
+        for library in sorted(libraries):
+            patch_targets.setdefault(library, set()).add(nid)
+
+    patched = 0
+    for library, nids in sorted(patch_targets.items()):
+        target = staged / library
+        if not target.is_file():
+            unresolved += len(nids)
+            log.append(
+                f"[exports] {library}: no staged file, "
+                f"{len(nids)} absent import(s) stay unresolved"
+            )
+            continue
+        try:
+            existing = set(import_audit.read_exports(target))
+        except Exception as error:  # noqa: BLE001 - one unreadable file must not hide the rest
+            log.append(f"[exports] {library}: cannot read its exports ({error})")
+            continue
+        missing = sorted(set(nids) - existing)
+        if not missing:
+            continue
+        try:
+            stats = prx_export_patch.add_exports(target, target, missing)
+        except (prx_export_patch.PatchError, OSError) as error:
+            log.append(f"[exports] {library}: cannot add the missing exports ({error})")
+            unresolved += len(missing)
+            continue
+        patched += len(missing)
+        log.append(
+            f"[exports] {library}: +{len(missing)} export(s), "
+            f"{stats['old_exports']} -> {stats['total']}"
+        )
+
+    if first_ready and not patched and not copied and not unresolved:
+        return audit, True
+    try:
+        second, ready = audit_phase(config, staged, output, prepared, log, runner)
+    except PipelineError as error:
+        log.append(f"[exports] the re-audit of {staged} failed: {error}")
+        return audit, False
+    return (second if second else audit), ready
+
+
 def build(config: PipelineConfig, runner: Runner = _run,
           progress_callback: Callable | None = None) -> PipelineResult:
     """Run the whole pipeline and return a :class:`PipelineResult`.
@@ -513,6 +629,11 @@ def build(config: PipelineConfig, runner: Runner = _run,
         audit, ready = audit_phase(config, libs, config.output, prepared, log, runner)
         result.audit = audit
         record(Phase.AUDIT_DONE, True, "import audit completed")
+        audit, ready = exports_patched_phase(
+            config, config.output, prepared, audit, ready, log, runner
+        )
+        result.audit = audit
+        record(Phase.EXPORTS_PATCHED, True, "staged libraries completed and re-audited")
         record(Phase.DEPS_VERIFIED if ready else Phase.DEPS_INCOMPLETE, ready,
                "no blocking imports" if ready else "absent imports or missing libraries remain")
         result.ready_to_launch = ready

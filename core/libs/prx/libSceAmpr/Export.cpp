@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <ctime>
+#include <windows.h>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/SonyCrt.hpp"
@@ -941,8 +942,7 @@ void APS5_VABI _ZNSt4_PadD2Ev_nid_postfix(GuestPad* pad) {
 }
 
 int APS5_VABI _Thrd_id_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return static_cast<int>(GetCurrentThreadId());
 }
 
 void APS5_VABI _ZNSt4_Pad7_LaunchEPP7pthread_nid_postfix(GuestPad* pad, Pthread* thread) {

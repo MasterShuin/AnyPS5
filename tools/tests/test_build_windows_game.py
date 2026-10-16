@@ -54,10 +54,14 @@ class ScriptedRunner:
     output; the audit call writes ``audit.json`` and returns a configurable code.
     """
 
-    def __init__(self, *, relinker_rc=0, audit_rc=0, audit_summary=None):
+    def __init__(self, *, relinker_rc=0, audit_rc=0, audit_summary=None, audit_results=None):
         self.relinker_rc = relinker_rc
         self.audit_rc = audit_rc
         self.audit_summary = audit_summary or {"unique_by_class": {"absent": 0}}
+        # Optional per-invocation ``(returncode, summary)`` sequence for
+        # pipelines that audit more than once (the staged re-audit); the last
+        # entry repeats if the pipeline audits again.
+        self.audit_results = list(audit_results) if audit_results else None
         self.relinker_cmds = []
         self.audit_cmds = []
 
@@ -65,9 +69,16 @@ class ScriptedRunner:
         args = [str(a) for a in cmd]
         if any("import_audit.py" in a for a in args):
             self.audit_cmds.append(args)
+            if self.audit_results is not None:
+                returncode, summary = (
+                    self.audit_results.pop(0) if len(self.audit_results) > 1
+                    else self.audit_results[0]
+                )
+            else:
+                returncode, summary = self.audit_rc, self.audit_summary
             json_index = args.index("--json")
-            Path(args[json_index + 1]).write_text(json.dumps(self.audit_summary))
-            return FakeProcess(self.audit_rc, "audit done", args=args)
+            Path(args[json_index + 1]).write_text(json.dumps(summary))
+            return FakeProcess(returncode, "audit done", args=args)
         self.relinker_cmds.append(args)
         if self.relinker_rc != 0:
             return FakeProcess(self.relinker_rc, "", "relinker failed", args=args)
@@ -261,6 +272,90 @@ class BuildWindowsGameTests(unittest.TestCase):
         result = bwg.build(self.config_for(source, self.tmp / "out"), runner=ScriptedRunner(audit_rc=2))
         self.assertEqual(result.reached, bwg.Phase.AUDIT_DONE.value)
         self.assertIn("import audit", result.error)
+
+    def test_exports_patched_adds_missing_exports_and_reaudits_staged_libs(self):
+        """An absent import is patched into the staged library, then re-audited.
+
+        The first audit (against the pristine native libraries) reports the NID
+        as absent; the pipeline must add it to the *staged* copy — never to the
+        native build — and decide readiness with a second audit pointed at the
+        staged directory, which is what the Windows loader will read.
+        """
+        first = {"unique_by_class": {"absent": 2}, "imports": [
+            {"nid": "AAAAAAAAAAA", "library": "libc.prx", "class": "absent"},
+            {"nid": "BBBBBBBBBBB", "library": None, "class": "absent"},
+        ]}
+        second = {"unique_by_class": {"implemented": 2, "absent": 0}}
+        runner = ScriptedRunner(audit_results=[(1, first), (0, second)])
+        output = self.tmp / "out"
+        with mock.patch.object(bwg.import_audit, "read_exports", return_value=set()), \
+                mock.patch.object(bwg.prx_export_patch, "add_exports",
+                                  return_value={"old_exports": 0, "added": 2, "total": 2}) as add:
+            result = bwg.build(self.config_for(self.game_folder("game"), output), runner=runner)
+        self.assertIsNone(result.error)
+        self.assertEqual(result.reached, bwg.Phase.DEPS_VERIFIED.value)
+        self.assertEqual(len(runner.audit_cmds), 2, "the staged re-audit never ran")
+        second_cmd = runner.audit_cmds[1]
+        libs_index = second_cmd.index("--libs")
+        self.assertEqual(Path(second_cmd[libs_index + 1]), output / "libs")
+        self.assertEqual(result.audit, second)
+        # Both the declared library and the library-less import land in libc.prx.
+        add.assert_called_once()
+        target, same, nids = add.call_args.args
+        self.assertEqual(Path(target), output / "libs" / "libc.prx")
+        self.assertEqual(Path(same), output / "libs" / "libc.prx")
+        self.assertEqual(nids, ["AAAAAAAAAAA", "BBBBBBBBBBB"])
+
+    def test_exports_patched_stages_converted_modules_without_overwriting(self):
+        """``app0/sce_module/<name>.guest.prx`` is staged as ``libs/<name>.prx``.
+
+        A staged native library always wins: the converted copy of a bundled
+        system library must never replace the build the rpath resolves.
+        """
+        def prepare_with_modules(staged_from, prepared, *a, **k):
+            prepared = Path(prepared)
+            (prepared / "sce_sys").mkdir(parents=True, exist_ok=True)
+            (prepared / "eboot.bin").write_bytes(b"\x7fELF")
+            (prepared / "sce_module").mkdir()
+            (prepared / "sce_module" / "lib.prx").write_bytes(b"\x7fELF")
+            return prepared
+
+        output = self.tmp / "out"
+        scripted = ScriptedRunner()
+
+        def runner(cmd, timeout=None):
+            args = [str(a) for a in cmd]
+            if not any("import_audit.py" in a for a in args):
+                guest = output / "app0" / "sce_module"
+                guest.mkdir(parents=True, exist_ok=True)
+                (guest / "lib.prx.guest.prx").write_bytes(b"MZ-GUEST")
+                (guest / "libc.prx.guest.prx").write_bytes(b"MZ-OVERRIDE")
+            return scripted(args, timeout)
+
+        with mock.patch.object(bwg._prepare, "prepare_run", prepare_with_modules):
+            source = self.game_folder("game", with_modules=True)
+            result = bwg.build(self.config_for(source, output), runner=runner)
+        self.assertIsNone(result.error)
+        self.assertEqual((output / "libs" / "lib.prx").read_bytes(), b"MZ-GUEST")
+        # The native libc.prx staged by libs_staged is never overwritten.
+        self.assertEqual((output / "libs" / "libc.prx").read_bytes(), b"\x7fELF" + b"\x00" * 60)
+
+    def test_exports_patched_patch_failure_stays_honest(self):
+        """A library that cannot be patched is reported, never silently ready."""
+        first = {"unique_by_class": {"absent": 1}, "imports": [
+            {"nid": "AAAAAAAAAAA", "library": "libc.prx", "class": "absent"},
+        ]}
+        still = {"unique_by_class": {"absent": 1}}
+        runner = ScriptedRunner(audit_results=[(1, first), (1, still)])
+        with mock.patch.object(bwg.import_audit, "read_exports", return_value=set()), \
+                mock.patch.object(bwg.prx_export_patch, "add_exports",
+                                  side_effect=bwg.prx_export_patch.PatchError("no slack")):
+            result = bwg.build(self.config_for(self.game_folder("game"), self.tmp / "out"),
+                               runner=runner)
+        self.assertIsNone(result.error)
+        self.assertEqual(result.reached, bwg.Phase.DEPS_INCOMPLETE.value)
+        self.assertFalse(result.ready_to_launch)
+        self.assertIn("cannot add the missing exports", result.log)
 
     def test_audit_modules_points_at_source_elf_not_converted_pe(self):
         """``--modules`` must be the staged source ELF modules, never the output PE.

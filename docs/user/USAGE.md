@@ -126,7 +126,8 @@ The pipeline runs explicit phases and stops at the first failure, never reusing 
 3. **pe_generated** — runs `relinker --windows --registry --rpath '$ORIGIN/libs'` (adding `--skip-sce-module` only when no bundled modules exist, and `--windows-gui` with `--windows-gui`). The result must be a PE (`MZ`).
 4. **libs_staged** — copies the native `*.prx` and the three MinGW runtime DLLs into `libs/`.
 5. **app0_staged** — copies the game payload into `app0/` (the relinker's converted modules already live in `app0/sce_module`; the original PS5 module directories are never copied there). `--copy-app-data` also copies the full game data.
-6. **audit_done** — runs `import_audit.py` and records `deps_verified` (exit 0) or `deps_incomplete` (exit 1).
+6. **audit_done** — runs `import_audit.py` against the native libraries and records what is missing.
+7. **exports_patched** — completes the staged `libs/`: each converted title module (`app0/sce_module/<name>.guest.prx`) is copied to `libs/<name>.prx` (an existing native library is never overwritten), every import the first audit reported `absent` is appended to the export table of the staged library it names (`tools/prx_export_patch.py`), and the audit runs again against the staged directory; that second verdict records `deps_verified` (exit 0) or `deps_incomplete` (exit 1).
 
 Output layout:
 
@@ -145,7 +146,7 @@ out/
 
 ### Progress, log and report in the windowed UI
 
-`python tools/ui_run.py` shows the conversion as it runs, not only at the end. `build()` accepts a `progress_callback` that the GUI registers so a progress bar and a current-phase line advance phase by phase (`input_validated` → `prepared` → `pe_generated` → `libs_staged` → `app0_staged` → `audit_done`), each labelled in plain Italian; a failed phase is marked with a ✖ instead of a ✔. The full pipeline log streams into the **Registro (log)** box under *Opzioni avanzate*.
+`python tools/ui_run.py` shows the conversion as it runs, not only at the end. `build()` accepts a `progress_callback` that the GUI registers so a progress bar and a current-phase line advance phase by phase (`input_validated` → `prepared` → `pe_generated` → `libs_staged` → `app0_staged` → `audit_done` → `exports_patched`), each labelled in plain Italian; a failed phase is marked with a ✖ instead of a ✔. The full pipeline log streams into the **Registro (log)** box under *Opzioni avanzate*.
 
 When the run ends — whether it succeeded, ended at `deps_incomplete` or failed — a **Resoconto** panel appears with the phase-by-phase outcome, the import-audit counts (implemented / stub / absent, plus any needed library without a file) and the complete log. Two buttons, **Copia log** and **Copia resoconto**, copy that text to the clipboard so the whole run can be pasted into a bug report; the copy buttons are enabled even on failure, because a failed run is exactly when the log matters most. The summary, the open-folder and try-to-launch buttons keep their usual meaning: a started process is still never reported as a playable game.
 
