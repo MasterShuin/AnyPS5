@@ -250,7 +250,7 @@ set(agcDriverSources
 find_package(Git QUIET)
 set(agcTraceRevisionHeader ${agcTextureDetileGeneratedRoot}/prx/libSceAgcDriver/TraceRevision.hpp)
 add_custom_target(agc_trace_revision
-        COMMAND ${CMAKE_COMMAND} -DGIT="${GIT_EXECUTABLE}" -DSOURCE="${CMAKE_SOURCE_DIR}" -DOUTPUT="${agcTraceRevisionHeader}" -P "${CMAKE_CURRENT_SOURCE_DIR}/trace_revision.cmake"
+        COMMAND "${CMAKE_COMMAND}" "-DGIT=${GIT_EXECUTABLE}" "-DSOURCE=${CMAKE_SOURCE_DIR}" "-DOUTPUT=${agcTraceRevisionHeader}" -P "${CMAKE_CURRENT_SOURCE_DIR}/trace_revision.cmake"
         BYPRODUCTS "${agcTraceRevisionHeader}"
         VERBATIM
 )

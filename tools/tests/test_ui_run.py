@@ -74,6 +74,25 @@ class DefaultOutputDirTests(unittest.TestCase):
             self.assertNotIn(game.resolve(), out.resolve().parents)
 
 
+class DefaultElfOutputDirTests(unittest.TestCase):
+    def test_sibling_folder_not_inside_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            game = Path(tmp) / "My Game (Demo)"
+            game.mkdir()
+            out = ui_run.default_elf_output_dir(game)
+            self.assertEqual(out.name, "AnyPS5_ELF")
+            self.assertEqual(out.parent, game.parent)
+            self.assertNotIn(game.resolve(), out.resolve().parents)
+
+    def test_does_not_clash_with_full_conversion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            game = Path(tmp) / "game"
+            game.mkdir()
+            self.assertNotEqual(
+                ui_run.default_elf_output_dir(game),
+                ui_run.default_output_dir(game))
+
+
 class ResolveComponentsTests(unittest.TestCase):
     def test_resolves_both(self):
         with mock.patch.object(ui_run._bwg, "resolve_relinker", return_value=Path("rel.exe")), \
@@ -170,6 +189,9 @@ class FakeApp:
     def _finish(self, out=None, exc=None):
         self.done.append(("prepare", out, exc))
 
+    def _finish(self, out=None, exc=None):
+        self.done.append(("prepare", out, exc))
+
 
 class WorkerPlumbingTests(unittest.TestCase):
     """The workers must hand results to the UI thread with positional args."""
@@ -202,15 +224,35 @@ class WorkerPlumbingTests(unittest.TestCase):
         self.assertEqual(fake.done[-1][0], "convert")
         self.assertIsInstance(fake.done[-1][2], RuntimeError)
 
-    def test_prepare_worker_success_and_failure(self):
+    def test_prepare_worker_defaults_to_elf_folder(self):
         fake = FakeApp()
         fake._source = Path(tempfile.mkdtemp(prefix="ui_prep_"))
-        fake.adv_output_var = SimpleNamespace(get=lambda: str(fake._source / "out"))
-        with mock.patch.object(ui_run, "_prepare_run", return_value=Path("prepared")):
+        fake.adv_output_var = SimpleNamespace(
+            get=lambda: str(ui_run.default_output_dir(fake._source)))
+        with mock.patch.object(ui_run, "_prepare_run", return_value=Path("prepared")) as prep:
             ui_run.RunConfigApp._worker(fake)
         func, args = fake.after_calls[-1][1], fake.after_calls[-1][2]
         func(*args)
         self.assertEqual(fake.done[-1], ("prepare", Path("prepared"), None))
+        self.assertEqual(
+            prep.call_args[0][1], ui_run.default_elf_output_dir(fake._source))
+
+    def test_prepare_worker_honours_custom_output(self):
+        fake = FakeApp()
+        fake._source = Path(tempfile.mkdtemp(prefix="ui_prep_"))
+        custom = fake._source / "custom"
+        fake.adv_output_var = SimpleNamespace(get=lambda: str(custom))
+        with mock.patch.object(ui_run, "_prepare_run", return_value=Path("prepared")) as prep:
+            ui_run.RunConfigApp._worker(fake)
+        func, args = fake.after_calls[-1][1], fake.after_calls[-1][2]
+        func(*args)
+        self.assertEqual(fake.done[-1], ("prepare", Path("prepared"), None))
+        self.assertEqual(prep.call_args[0][1], custom)
+
+    def test_prepare_worker_failure(self):
+        fake = FakeApp()
+        fake._source = Path(tempfile.mkdtemp(prefix="ui_prep_"))
+        fake.adv_output_var = SimpleNamespace(get=lambda: "")
 
         def boom(*a, **k):
             raise ValueError("bad input")

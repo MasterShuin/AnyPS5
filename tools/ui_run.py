@@ -4,7 +4,10 @@
 A non-technical user picks a PS5 game (a ``.pkg``/``.ffpfs``/``.ffpfsc``/``.exfat``
 container, a game folder containing ``eboot.bin``, or a standalone ELF), presses
 **Converti gioco**, and the whole pipeline runs — extraction, preparation,
-Windows relinking and the dependency audit — in a worker thread. Technical
+Windows relinking and the dependency audit — in a worker thread. The
+**Solo ELF** button next to it only runs the preparation step (extraction +
+SELF → ELF), without the Windows relink, for users who just want the plain
+ELF file(s). Technical
 options live in an optional **Opzioni avanzate** section.
 
 The window never claims a game is playable: it distinguishes *PE generated*,
@@ -94,6 +97,15 @@ def default_output_dir(source) -> Path:
     Never inside the input, so the original game files are never modified.
     """
     return Path(source).resolve().parent / _OUTPUT_FOLDER_NAME
+
+
+def default_elf_output_dir(source) -> Path:
+    """Return a sibling ``AnyPS5_ELF`` folder next to *source*.
+
+    Kept separate from :func:`default_output_dir` so an ELF-only run never
+    mixes its files with a full Windows conversion of the same game.
+    """
+    return Path(source).resolve().parent / "AnyPS5_ELF"
 
 
 def resolve_components(relinker=None, libs=None) -> tuple:
@@ -228,6 +240,7 @@ class RunConfigApp(tkinter.Tk):
         self._win_config = None
         self._win_result = None
         self._win_report = ""
+        self._elf_output = None
         self._palette = {
             "info": "#a9b3c2", "ok": "#3fb950", "warn": "#d29922",
             "error": "#f85149", "idle": "#8b949e",
@@ -245,7 +258,8 @@ class RunConfigApp(tkinter.Tk):
         tkinter.Label(body, text="Converti un gioco PS5 per Windows",
                       font=("", 14, "bold")).pack(anchor="w", **pad)
         tkinter.Label(body, wraplength=500, justify="left", foreground="#a9b3c2",
-                      text="Scegli il gioco e premi «Converti gioco». Le opzioni "
+                      text="Scegli il gioco e premi «Converti gioco» per Windows, "
+                           "oppure «Solo ELF» per ottenere solo i file ELF (SELF → ELF). Le opzioni "
                            "avanzate sono facoltative.").pack(anchor="w", **pad)
 
         self.choose_btn = tkinter.Button(body, text="📁  Scegli gioco",
@@ -259,6 +273,11 @@ class RunConfigApp(tkinter.Tk):
         self.convert_btn = tkinter.Button(body, text="▶  Converti gioco",
                                           command=self._on_convert, height=2, state="disabled")
         self.convert_btn.pack(fill="x", **pad)
+
+        self.elf_btn = tkinter.Button(body, text="📦  Solo ELF (SELF → ELF, senza relink)",
+                                      command=self._on_prepare_only, height=2, state="disabled")
+        self.elf_btn.pack(fill="x", **pad)
+
 
         self.progress = tkinter.ttk.Progressbar(body, mode="determinate", maximum=100)
         self.progress.pack(fill="x", **pad)
@@ -327,7 +346,7 @@ class RunConfigApp(tkinter.Tk):
         tkinter.Checkbutton(parent, text="Copia tutti i dati di gioco in app0/",
                             variable=self.adv_copy_var, anchor="w").pack(anchor="w")
 
-        tkinter.Button(parent, text="Solo preparazione (avanzato)",
+        tkinter.Button(parent, text="Solo preparazione (usa la cartella di output)",
                        command=self._on_prepare_only).pack(fill="x", pady=(6, 0))
         tkinter.Label(parent, text="Registro (log)", anchor="w").pack(anchor="w", pady=(6, 0))
         self.adv_log = tkinter.scrolledtext.ScrolledText(parent, height=8, wrap="word", state="disabled")
@@ -385,6 +404,7 @@ class RunConfigApp(tkinter.Tk):
         self._set_summary("", "idle")
         self._set_status(message, "error" if kind in ("missing", "unsupported", "folder_no_eboot") else "info")
         self.convert_btn.config(state="normal" if kind in _ACCEPTABLE_KINDS else "disabled")
+        self.elf_btn.config(state="normal" if kind in _ACCEPTABLE_KINDS else "disabled")
         self.open_btn.config(state="disabled")
         self.launch_btn.config(state="disabled")
         self.copy_log_btn.config(state="disabled")
@@ -392,6 +412,7 @@ class RunConfigApp(tkinter.Tk):
         self.report_box.pack_forget()
         self.phase_var.set("")
         self._win_result = None
+        self._elf_output = None
 
     # -------------------------------------------------------------- helpers -- #
     def _set_status(self, text, kind="info"):
@@ -437,6 +458,7 @@ class RunConfigApp(tkinter.Tk):
         self._busy = True
         self.choose_btn.config(state="disabled")
         self.convert_btn.config(state="disabled")
+        self.elf_btn.config(state="disabled")
         self.open_btn.config(state="disabled")
         self.launch_btn.config(state="disabled")
         self._set_summary("", "idle")
@@ -486,6 +508,7 @@ class RunConfigApp(tkinter.Tk):
         self.progress.config(mode="determinate", value=100, maximum=100)
         self.choose_btn.config(state="normal")
         self.convert_btn.config(state="normal")
+        self.elf_btn.config(state="normal")
         outcome = classify_outcome(result, exc)
         if result is not None and result.log:
             self._append_log(result.log + "\n")
@@ -529,6 +552,8 @@ class RunConfigApp(tkinter.Tk):
     # ------------------------------------------------------- open and launch -- #
     def _on_open_output(self):
         output = self._win_config.output if self._win_config else None
+        if output is None and getattr(self, "_elf_output", None):
+            output = self._elf_output
         if not output or not Path(output).is_dir():
             self._set_status("Nessuna cartella di risultato da aprire.", "error")
             return
@@ -559,19 +584,39 @@ class RunConfigApp(tkinter.Tk):
 
     # ------------------------------------------------ prepare-only (advanced) -- #
     def _on_prepare_only(self):
+        """Run only the preparation step (extraction + SELF → ELF).
+
+        This is the user-facing “Solo ELF” action: it needs no relinker and no
+        native libs, and leaves a run directory of plain ELF files in a
+        dedicated ``AnyPS5_ELF`` sibling folder.
+        """
         if self._busy:
             return
-        if not self._source:
-            self._set_status("Seleziona prima un gioco.", "error")
+        if not self._source or self._input_kind not in _ACCEPTABLE_KINDS:
+            self._set_status("Seleziona prima un gioco valido.", "error")
             return
         self._busy = True
-        self._set_status("Preparazione in corso…")
+        self.choose_btn.config(state="disabled")
+        self.convert_btn.config(state="disabled")
+        self.elf_btn.config(state="disabled")
+        self.open_btn.config(state="disabled")
+        self.launch_btn.config(state="disabled")
+        self._set_summary("", "idle")
+        self._set_status("Conversione in ELF in corso… (estrazione + SELF → ELF)")
+        self.phase_var.set("✔ Preparazione dei file (estrazione, SELF → ELF)")
         self.progress.start(12)
         threading.Thread(target=self._worker, daemon=True).start()
 
     def _worker(self):
+        # An advanced custom output still wins; otherwise the ELF-only run
+        # goes to its own sibling folder, never mixed with a full conversion.
+        raw = self.adv_output_var.get().strip() if self.adv_output_var.get() else ""
+        if raw and Path(raw) != default_output_dir(self._source):
+            output = Path(raw)
+        else:
+            output = default_elf_output_dir(self._source)
         try:
-            out = _prepare_run(self._source, Path(self.adv_output_var.get() or default_output_dir(self._source)))
+            out = _prepare_run(self._source, output)
         except Exception as exc:  # noqa: BLE001 - report to the UI thread
             self.after(0, self._finish, None, exc)
             return
@@ -580,11 +625,21 @@ class RunConfigApp(tkinter.Tk):
     def _finish(self, out=None, exc=None):
         self._busy = False
         self.progress.stop()
+        self.progress.config(mode="determinate", value=100, maximum=100)
+        self.choose_btn.config(state="normal")
+        self.convert_btn.config(state="normal")
+        self.elf_btn.config(state="normal")
         if exc is not None:
             message = str(exc) or exc.__class__.__name__
-            self._set_status(f"Preparazione non riuscita: {message}", "error")
+            self._set_summary("Conversione ELF non riuscita", "error")
+            self._set_status(f"Conversione ELF non riuscita: {message}", "error")
+            tkinter.messagebox.showerror("Conversione ELF non riuscita", message)
             return
-        self._set_status(f"Preparazione completata in {out}", "ok")
+        self._elf_output = out
+        self._set_summary("Conversione ELF completata", "ok")
+        self._set_status(f"File ELF pronti in {out}", "ok")
+        self.phase_var.set("✔ Preparazione dei file (estrazione, SELF → ELF)")
+        self.open_btn.config(state="normal" if Path(out).is_dir() else "disabled")
 
     def _on_close(self):
         if self._busy and not tkinter.messagebox.askyesno(
