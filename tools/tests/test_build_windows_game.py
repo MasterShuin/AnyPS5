@@ -261,6 +261,33 @@ class BuildWindowsGameTests(unittest.TestCase):
         self.assertIsNone(result.error)
         self.assertTrue((output / "game.exe").is_file())
 
+    def test_staging_finds_mingw_runtime_in_toolchain_directory(self):
+        build = self.tmp / "build"
+        toolchain = build / "toolchain" / "bin"
+        toolchain.mkdir(parents=True)
+        compiler = toolchain / "x86_64-w64-mingw32-g++.exe"
+        compiler.write_bytes(b"MZ")
+        for name in bwg.MINGW_DEPENDENCY_DLLS:
+            (toolchain / name).write_bytes(b"MZ" + name.encode())
+        (build / "CMakeCache.txt").write_text(
+            "CMAKE_CXX_COMPILER:FILEPATH=" + compiler.as_posix() + "\n", encoding="utf-8")
+        staged_libs = build / "core" / "libs" / "libs"
+        staged_libs.mkdir(parents=True)
+        for name in ("libc.prx", "libkernel.prx", "libScePad.prx"):
+            (staged_libs / name).write_bytes(b"\x7fELF" + b"\x00" * 60)
+        source = self.game_folder("game")
+        output = self.tmp / "out"
+        config = self.config_for(source, output)
+        config.libs = staged_libs
+        result = bwg.build(config, runner=ScriptedRunner())
+        self.assertIsNone(result.error)
+        self.assertIn("3 runtime DLL(s)", result.log)
+        for name in bwg.MINGW_DEPENDENCY_DLLS:
+            staged = output / "libs" / name
+            self.assertTrue(staged.is_file(), name)
+            self.assertEqual(staged.read_bytes(), b"MZ" + name.encode())
+
+
     def test_audit_verified_ready(self):
         source = self.game_folder("game")
         result = bwg.build(self.config_for(source, self.tmp / "out"), runner=ScriptedRunner(audit_rc=0))

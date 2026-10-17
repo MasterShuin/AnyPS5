@@ -372,16 +372,54 @@ def _copy_payload(src: Path, dst: Path, log: list) -> list:
     return copied
 
 
+def _mingw_runtime_dirs(libs: Path) -> list[Path]:
+    resolved = libs.resolve()
+    dirs: list[Path] = [resolved]
+    for parent in (resolved, *resolved.parents):
+        cache = parent / "CMakeCache.txt"
+        if cache.is_file():
+            for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.startswith("CMAKE_CXX_COMPILER:"):
+                    compiler = line.partition("=")[2].strip()
+                    if compiler and not compiler.endswith("-NOTFOUND"):
+                        dirs.append(Path(compiler).parent)
+                    break
+            break
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for item in dirs:
+        if item not in seen:
+            seen.add(item)
+            unique.append(item)
+    return unique
+
+
 def stage_libs_phase(config: PipelineConfig, libs: Path, output: Path, log: list) -> Path:
     """Copy the native system libraries (and MinGW runtime DLLs) into ``libs/``."""
+
+
     dst = output / "libs"
     dst.mkdir(parents=True, exist_ok=True)
     prx = sorted(libs.glob("*.prx"))
     if not prx:
         raise PipelineError(Phase.LIBS_STAGED, f"no *.prx files in {libs}")
+    runtime_dirs = _mingw_runtime_dirs(libs)
+    dlls: list[Path] = []
+    dll_hits: dict[str, Path] = {}
+    for directory in runtime_dirs:
+        for name in MINGW_DEPENDENCY_DLLS:
+            if name in dll_hits:
+                continue
+            candidate = directory / name
+            if candidate.is_file():
+                dll_hits[name] = candidate
+    for name in MINGW_DEPENDENCY_DLLS:
+        if name in dll_hits:
+            dlls.append(dll_hits[name])
+
     for item in prx:
         shutil.copy2(item, dst / item.name)
-    dlls = [libs / name for name in MINGW_DEPENDENCY_DLLS if (libs / name).is_file()]
+    dlls: list[Path] = [dll_hits[name] for name in MINGW_DEPENDENCY_DLLS if name in dll_hits]
     for item in dlls:
         shutil.copy2(item, dst / item.name)
     missing_essential = [n for n in ESSENTIAL_PRX if not (dst / n).is_file()]
