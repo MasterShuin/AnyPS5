@@ -382,9 +382,22 @@ def _mingw_runtime_dirs(libs: Path) -> list[Path]:
                 if line.startswith("CMAKE_CXX_COMPILER:"):
                     compiler = line.partition("=")[2].strip()
                     if compiler and not compiler.endswith("-NOTFOUND"):
-                        dirs.append(Path(compiler).parent)
+                        compiler_path = Path(compiler)
+                        if not compiler_path.is_absolute():
+                            resolved_compiler = shutil.which(compiler)
+                            if resolved_compiler:
+                                compiler_path = Path(resolved_compiler)
+                        dirs.append(compiler_path.parent)
                     break
             break
+    # Fallback: if CMakeCache did not yield a usable toolchain dir (e.g.
+    # CMAKE_CXX_COMPILER is just "g++"), resolve via PATH.
+    if not any((d / "libgcc_s_seh-1.dll").is_file() for d in dirs):
+        for name in ("g++", "gcc", "c++"):
+            resolved = shutil.which(name)
+            if resolved:
+                dirs.append(Path(resolved).parent)
+                break
     seen: set[Path] = set()
     unique: list[Path] = []
     for item in dirs:
