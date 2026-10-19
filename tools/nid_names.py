@@ -188,8 +188,8 @@ def main(argv=None):
     requested_nids = "--nid" in requested_options
     if requested_nids and requested_options & {"--name", "--symbol"}:
         parser.error("--name/--symbol cannot be combined with --nid")
-    if args.name:
-        rows = [{"name": name, "nid": compute_nid(name)} for name in args.name]
+    if requested_options & {"--name", "--symbol"}:
+        rows = [{"name": name, "nid": compute_nid(name)} for name in (args.name or [])]
         if args.json:
             print(json.dumps({"symbols": rows}, indent=1))
         else:
@@ -197,7 +197,8 @@ def main(argv=None):
             for row in rows:
                 print("%-40s %s" % (row["name"], row["nid"]))
         return 0
-    for nid in args.nid or []:
+    args.nid = [nid.split("#", 1)[0] for nid in args.nid or []]
+    for nid in args.nid:
         if re.fullmatch(r"[A-Za-z0-9+\-]{11}", nid) is None:
             parser.error(f"invalid NID {nid!r}: expected 11 characters from A-Z, a-z, 0-9, + or -")
 

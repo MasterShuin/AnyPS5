@@ -10,7 +10,7 @@ from pathlib import Path
 
 CPP = (".cpp", ".cc", ".cxx", ".c")
 DROP = ("-c", "-MD", "-MMD", "-MP")
-DROP_WITH_VALUE = ("-o", "-MT", "-MF")
+DROP_WITH_VALUE = ("-o", "-MT", "-MF", "-MJ")
 
 
 def capture(command, cwd=None):
@@ -34,7 +34,7 @@ def entries(build):
     ninja = shutil.which("ninja")
     if ninja is None:
         raise ValueError(f"no {manifest} and ninja is not on PATH")
-    result = capture([ninja, "-C", str(build), "-t", "compdb"])
+    result = capture([ninja, "-C", str(build), "-t", "compdb", "-x"])
     if result.returncode != 0:
         raise ValueError(f"ninja -t compdb: {result.stderr.strip()}")
     return json.loads(result.stdout)
@@ -55,12 +55,15 @@ def entry_key(entry, root):
 def index(build, root):
     commands = {}
     for entry in entries(build):
-        commands.setdefault(entry_key(entry, root), entry)
+        commands.setdefault(entry_key(entry, root), []).append(entry)
     return commands
 
 
 def changed(root, base):
-    result = capture(["git", "-C", str(root), "diff", "--name-only", "--diff-filter=ACMR", "-z", base])
+    fork = capture(["git", "-C", str(root), "merge-base", base, "HEAD"])
+    if fork.returncode != 0:
+        raise ValueError(f"git merge-base {base}: {fork.stderr.strip()}")
+    result = capture(["git", "-C", str(root), "diff", "--name-only", "--diff-filter=ACMR", "-z", fork.stdout.strip()])
     if result.returncode != 0:
         raise ValueError(f"git diff {base}: {result.stderr.strip()}")
     untracked = capture(["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "-z"])
@@ -94,6 +97,12 @@ def command_arguments(command):
 def syntax_only(entry, source):
     arguments = command_arguments(entry["command"])
     directory = Path(entry["directory"])
+    return syntax_arguments(arguments, directory, source)
+
+
+def syntax_arguments(arguments, directory, source):
+    if not isinstance(arguments, list) or not arguments or any(not isinstance(argument, str) for argument in arguments) or not arguments[0]:
+        raise ValueError("arguments must be a nonempty list of strings with an executable")
     wanted = source.resolve()
     trimmed = []
     index = 0
@@ -102,7 +111,7 @@ def syntax_only(entry, source):
         if argument in DROP_WITH_VALUE:
             index += 2
             continue
-        if argument in DROP:
+        if argument in DROP or argument.startswith("-MJ"):
             index += 1
             continue
         if not argument.startswith("-"):
@@ -125,22 +134,30 @@ def check(root, build, files):
     for file in files:
         source = file.resolve()
         name = os.path.relpath(source, root).replace(os.sep, "/")
-        entry = commands.get(name)
-        if entry is None:
+        configurations = commands.get(name)
+        if configurations is None:
             print(f"{name}: no compile command in {build}", file=sys.stderr)
             continue
         checked += 1
-        result = subprocess.run(syntax_only(entry, source), cwd=entry["directory"],
-                                capture_output=True, text=True, encoding="utf-8", errors="replace")
-        if result.returncode == 0:
-            continue
-        failed += 1
-        output = (result.stdout or "") + (result.stderr or "")
-        sys.stderr.write(output if output.endswith("\n") else output + "\n")
+        source_failed = False
+        for entry in configurations:
+            command = (syntax_arguments(entry["arguments"], Path(entry["directory"]), source)
+                       if "arguments" in entry else syntax_only(entry, source))
+            result = subprocess.run(command, cwd=entry["directory"],
+                                    capture_output=True, text=True, encoding="utf-8", errors="replace")
+            if result.returncode == 0:
+                continue
+            source_failed = True
+            output = (result.stdout or "") + (result.stderr or "")
+            sys.stderr.write(output if output.endswith("\n") else output + "\n")
+        failed += int(source_failed)
     return checked, failed
 
 
 def main(argv=None):
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="compile the changed translation units only, to check a change builds without a full build")
     parser.add_argument("--build", type=Path, default=Path("build"),

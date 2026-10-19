@@ -55,7 +55,6 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteLinux(const Relinker::GuestIma
             Io::WriteU32(symbols, index * 24, addString("__tls_get_addr"));
             needsTlsResolver = true;
         }
-        if (symbol.Section == 0 && (symbol.Info >> 4) == 2) symbols[index * 24 + 4] = static_cast<std::uint8_t>(0x10 | (symbol.Info & 15));
     }
     std::vector<std::uint64_t> needed;
     for (const auto& dependency : dependencies) needed.push_back(addString(dependency));
@@ -180,7 +179,7 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteLinux(const Relinker::GuestIma
     if (!image.FiniArray.empty()) { tag(26, image.FiniArray.front()); tag(28, image.FiniArray.size() * 8); }
     if (init != 0) tag(12, init);
     if (fini != 0) tag(13, fini);
-    tag(30, 8);
+    tag(30, DF_BIND_NOW | (image.Symbolic ? DF_SYMBOLIC : 0));
     tag(0, 0);
     const auto dynamicSize = bytes.size() - dynamicOffset;
     using namespace Codegen::Amd64OnlySubstitutionTable;

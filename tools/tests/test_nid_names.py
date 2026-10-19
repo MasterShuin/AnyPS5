@@ -15,6 +15,21 @@ import nid_names
 
 
 class DatabaseCacheTests(unittest.TestCase):
+    def test_empty_symbol_filters_do_not_open_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for option in ("--name", "--symbol", "--na", "--sym"):
+                for json_output in (False, True):
+                    with self.subTest(option=option, json_output=json_output):
+                        result = subprocess.run(
+                            [sys.executable, str(Path(nid_names.__file__)), option, "--db", directory,
+                             *(["--json"] if json_output else [])], capture_output=True, text=True)
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(result.stderr, "")
+                        if json_output:
+                            self.assertEqual(json.loads(result.stdout), {"symbols": []})
+                        else:
+                            self.assertEqual(result.stdout.split(), ["NAME", "NID"])
+
     def test_interrupted_download_does_not_publish_a_partial_cache(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory) / "cache" / "aerolib.csv"
@@ -152,6 +167,18 @@ class NidArgumentTests(unittest.TestCase):
             self.assertEqual(nid_names.main(["--nid=AAAAAAAAAA+", "--json"]), 0)
         row, = json.loads(output.getvalue())["rows"]
         self.assertEqual((row["nid"], row["status"]), ("AAAAAAAAAA+", "unknown"))
+
+    def test_nid_with_library_module_suffix_matches_the_bare_nid(self):
+        results = []
+        for nid in ("ZjtRqSMJwdw", "ZjtRqSMJwdw#C#D"):
+            output = io.StringIO()
+            with patch.object(nid_names, "load_db", return_value={"ZjtRqSMJwdw": "sinh"}), \
+                    patch.object(nid_names, "collect_real_names", return_value=set()), \
+                    contextlib.redirect_stdout(output):
+                self.assertEqual(nid_names.main(["--nid=" + nid, "--json"]), 0)
+            results.append(json.loads(output.getvalue())["rows"])
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[1][0]["nid"], "ZjtRqSMJwdw")
 
     def normalize(self, arguments):
         return nid_names.nid_arguments(arguments, self.options)
