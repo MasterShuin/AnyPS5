@@ -238,9 +238,4 @@ const char* APS5_VABI _ZNKSt13__sce_cxxvers16_Error_exception4whatEv_nid_postfix
     return "";
 }
 
-[[noreturn]] void APS5_VABI _ZSt26__throw_bad_variant_accessv_nid_postfix() {
-    NotImplemented_nid_no_patch(__func__);
-    throw std::runtime_error("__throw_bad_variant_access");
-}
-
 }
