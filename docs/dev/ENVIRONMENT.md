@@ -514,6 +514,8 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 
 | Name | Kind | Source | Default | Description |
 |------|------|--------|---------|-------------|
+| `ANYPS5_LOG_FILE` | string | `core/libs/prx/libc/include/general/DiagnosticLog.hpp` |  | path of a file appended the diagnostic log lines, in addition to stdout |
+| `ANYPS5_LOG_LEVEL` | string | `core/libs/prx/libc/include/general/DiagnosticLog.hpp` | info | minimum level of the diagnostic log lines: error, warn, info, debug or trace |
 | `APS5_CRASH_INDIRECT_MEMORY` | presence | `core/libs/prx/libc/src/specifics/windows/CrashReport.cpp` |  | dumps the words the faulting registers point at in the Windows crash report |
 | `APS5_HANG_DUMP_SECS` | integer | `core/libs/prx/libc/src/specifics/windows/CrashReport.cpp` |  | seconds after which a watchdog dumps all threads and aborts |
 | `APS5_HEAP_CACHE_MIB` | integer | `core/libs/prx/libc/src/GuestHeap.cpp` | 4096 | size in MiB of the cache of freed large blocks before the oldest are decommitted |

@@ -1,5 +1,6 @@
 #include "prx/libkernel/Semaphore/include/Semaphore.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
+#include "prx/libc/include/general/DiagnosticLog.hpp"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -27,6 +28,8 @@ int APS5_VABI sceKernelCreateSema(KernelSema* sem, const char* name, uint32_t at
 
  *sem = new KernelSemaPrivate(init, max, std::string(name), attr == 1);
  if (TraceSync()) std::fprintf(stderr, "[sema] create %p '%s' attr=0x%x init=%d max=%d\n", static_cast<void*>(*sem), name, attr, init, max);
+ APS5_DIAG_LOG(info, "sema", "create sem=%p name='%s' attr=0x%x init=%d max=%d result=0",
+     static_cast<void*>(*sem), name, attr, init, max);
  return KERNEL_SEMA_OK;
 }
 
@@ -37,9 +40,13 @@ int APS5_VABI sceKernelPollSema(KernelSema sem, int need) {
 
  std::lock_guard<std::mutex> lock(sem->mutex);
  if (sem->tokenCount < need) {
+  APS5_DIAG_LOG(debug, "sema", "poll sem=%p name='%s' need=%d have=%d result=EBUSY",
+      static_cast<void*>(sem), sem->name.c_str(), need, sem->tokenCount);
   return SCE_KERNEL_ERROR_EBUSY;
  }
  sem->tokenCount -= need;
+ APS5_DIAG_LOG(debug, "sema", "poll sem=%p name='%s' need=%d have=%d result=OK",
+     static_cast<void*>(sem), sem->name.c_str(), need, sem->tokenCount);
  return KERNEL_SEMA_OK;
 }
 
@@ -55,6 +62,8 @@ int APS5_VABI sceKernelSignalSema(KernelSema sem, int count) {
  const auto before = sem->tokenCount;
  sem->tokenCount += count;
  if (TraceSync()) std::fprintf(stderr, "[sema] signal %p '%s' count=%d have=%d->%d\n", static_cast<void*>(sem), sem->name.c_str(), count, before, sem->tokenCount);
+ APS5_DIAG_LOG(info, "sema", "signal sem=%p name='%s' count=%d have=%d->%d result=OK",
+     static_cast<void*>(sem), sem->name.c_str(), count, before, sem->tokenCount);
  sem->condition.NotifyAll();
  return KERNEL_SEMA_OK;
 }
@@ -83,6 +92,9 @@ int APS5_VABI sceKernelWaitSema(KernelSema sem, int need, KernelUseconds* time) 
  const auto waitStart = std::chrono::steady_clock::now();
  const void* caller = __builtin_return_address(0);
  if (TraceSync()) std::fprintf(stderr, "[sema] wait begin %p '%s' need=%d have=%d timeout=%lld caller=%p\n", static_cast<void*>(sem), sem->name.c_str(), need, sem->tokenCount, time ? static_cast<long long>(*time) : -1LL, caller);
+ APS5_DIAG_LOG(info, "sema", "wait_begin sem=%p name='%s' need=%d have=%d timeout=%lld caller=%p",
+     static_cast<void*>(sem), sem->name.c_str(), need, sem->tokenCount,
+     time ? static_cast<long long>(*time) : -1LL, caller);
  const auto traceSyncWaitEnd = [&](int result) {
   if (TraceSync()) std::fprintf(stderr, "[sema] wait end %p '%s' result=0x%x have=%d caller=%p\n", static_cast<void*>(sem), sem->name.c_str(), result, sem->tokenCount, caller);
  };
@@ -95,14 +107,20 @@ int APS5_VABI sceKernelWaitSema(KernelSema sem, int need, KernelUseconds* time) 
   traceWait(false);
   if (sem->deleted) {
    traceSyncWaitEnd(SCE_KERNEL_ERROR_EACCES);
+   APS5_DIAG_LOG(warn, "sema", "wait_end sem=%p name='%s' result=EACCES deleted caller=%p",
+       static_cast<void*>(sem), sem->name.c_str(), caller);
    return SCE_KERNEL_ERROR_EACCES;
   }
   if (sem->cancelGeneration != generation) {
    traceSyncWaitEnd(SCE_KERNEL_ERROR_ECANCELED);
+   APS5_DIAG_LOG(warn, "sema", "wait_end sem=%p name='%s' result=ECANCELED caller=%p",
+       static_cast<void*>(sem), sem->name.c_str(), caller);
    return SCE_KERNEL_ERROR_ECANCELED;
   }
   sem->tokenCount -= need;
   traceSyncWaitEnd(KERNEL_SEMA_OK);
+  APS5_DIAG_LOG(info, "sema", "wait_end sem=%p name='%s' result=OK have=%d caller=%p",
+      static_cast<void*>(sem), sem->name.c_str(), sem->tokenCount, caller);
   return KERNEL_SEMA_OK;
  }
 
@@ -112,18 +130,26 @@ int APS5_VABI sceKernelWaitSema(KernelSema sem, int need, KernelUseconds* time) 
  traceWait(!acquired);
  if (sem->deleted) {
   traceSyncWaitEnd(SCE_KERNEL_ERROR_EACCES);
+  APS5_DIAG_LOG(warn, "sema", "wait_end sem=%p name='%s' result=EACCES deleted caller=%p",
+      static_cast<void*>(sem), sem->name.c_str(), caller);
   return SCE_KERNEL_ERROR_EACCES;
  }
  if (sem->cancelGeneration != generation) {
   traceSyncWaitEnd(SCE_KERNEL_ERROR_ECANCELED);
+  APS5_DIAG_LOG(warn, "sema", "wait_end sem=%p name='%s' result=ECANCELED caller=%p",
+      static_cast<void*>(sem), sem->name.c_str(), caller);
   return SCE_KERNEL_ERROR_ECANCELED;
  }
  if (!acquired) {
   traceSyncWaitEnd(SCE_KERNEL_ERROR_ETIMEDOUT);
+  APS5_DIAG_LOG(warn, "sema", "wait_end sem=%p name='%s' result=ETIMEDOUT have=%d caller=%p",
+      static_cast<void*>(sem), sem->name.c_str(), sem->tokenCount, caller);
   return SCE_KERNEL_ERROR_ETIMEDOUT;
  }
  sem->tokenCount -= need;
  traceSyncWaitEnd(KERNEL_SEMA_OK);
+ APS5_DIAG_LOG(info, "sema", "wait_end sem=%p name='%s' result=OK have=%d caller=%p",
+     static_cast<void*>(sem), sem->name.c_str(), sem->tokenCount, caller);
  return KERNEL_SEMA_OK;
 }
 

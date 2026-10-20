@@ -16,6 +16,7 @@
 #include "SceTypes.hpp"
 #include "ModuleTable.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/general/DiagnosticLog.hpp"
 
 extern "C" void* APS5_VABI dlopen_nid_postfix(const char* path, int flags);
 
@@ -181,107 +182,187 @@ int APS5_VABI sceSysmoduleGetModuleHandleInternal(std::uint32_t id, std::int32_t
 }
 
 int APS5_VABI sceSysmoduleIsLoaded(std::uint16_t id) {
+    const char* name = findModuleName(id);
     if (id == 0) {
+        APS5_DIAG_LOG(error, "sysmodule", "is_loaded id=0 invalid");
         return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
-    if (!findModuleName(id)) {
+    if (!name) {
+        APS5_DIAG_LOG(warn, "sysmodule",
+            "is_loaded id=%u (0x%x) unknown; not in kModuleTable",
+            static_cast<unsigned>(id), static_cast<unsigned>(id));
         APS5_LOG_OUT("unknown id: %u", static_cast<unsigned>(id));
         return 0;
     }
     std::lock_guard<std::mutex> lock(gMutex);
     auto it = gLoadCount.find(id);
-    if (it == gLoadCount.end() || it->second < 1) {
+    bool loaded = it != gLoadCount.end() && it->second >= 1;
+    APS5_DIAG_LOG(info, "sysmodule",
+        "is_loaded id=%u (0x%x) name=%s loaded=%d",
+        static_cast<unsigned>(id), static_cast<unsigned>(id), name, loaded ? 1 : 0);
+    if (!loaded) {
         return SCE_SYSMODULE_ERROR_UNLOADED;
     }
     return 0;
 }
 
 int APS5_VABI sceSysmoduleLoadModule(std::uint16_t id) {
+    const char* name = findModuleName(id);
     if (id == 0) {
+        APS5_DIAG_LOG(error, "sysmodule", "load_module id=0 invalid");
         return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
-    if (!findModuleName(id)) {
+    if (!name) {
+        APS5_DIAG_LOG(warn, "sysmodule",
+            "load_module id=%u (0x%x) unknown; not in kModuleTable",
+            static_cast<unsigned>(id), static_cast<unsigned>(id));
         APS5_LOG_OUT("unknown id: %u", static_cast<unsigned>(id));
         return 0;
     }
+    APS5_DIAG_LOG(info, "sysmodule",
+        "load_module id=%u (0x%x) name=%s path=libs/%s.prx",
+        static_cast<unsigned>(id), static_cast<unsigned>(id), name, name);
     std::lock_guard<std::mutex> lock(gMutex);
     gLoadCount[id]++;
+    APS5_DIAG_LOG(info, "sysmodule",
+        "load_module id=%u (0x%x) name=%s result=0 load_count=%d",
+        static_cast<unsigned>(id), static_cast<unsigned>(id), name,
+        gLoadCount[id]);
     return 0;
 }
 
 int APS5_VABI sceSysmoduleLoadModuleInternalWithArg(std::uint32_t id, int argc, void* argv, std::uint64_t unk, int* ret) {
+    const char* name = findModuleName(id);
     (void)argc;
     (void)argv;
     (void)unk;
     if ((id & 0x7fffffffu) == 0) {
+        APS5_DIAG_LOG(error, "sysmodule", "load_module_internal_with_arg id=0 invalid");
         return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
-    if (!findModuleName(id)) {
+    if (!name) {
+        APS5_DIAG_LOG(warn, "sysmodule",
+            "load_module_internal_with_arg id=%u (0x%x) unknown; not in kModuleTable",
+            static_cast<unsigned>(id), static_cast<unsigned>(id));
         throw std::runtime_error(std::string("sceSysmoduleLoadModuleInternalWithArg: unknown id ") + std::to_string(id));
     }
+    APS5_DIAG_LOG(info, "sysmodule",
+        "load_module_internal_with_arg id=%u (0x%x) name=%s argc=%d",
+        static_cast<unsigned>(id), static_cast<unsigned>(id), name, argc);
     std::lock_guard<std::mutex> lock(gMutex);
     gLoadCount[id]++;
     if (ret) {
         *ret = 0;
     }
+    APS5_DIAG_LOG(info, "sysmodule",
+        "load_module_internal_with_arg id=%u (0x%x) name=%s result=0 load_count=%d",
+        static_cast<unsigned>(id), static_cast<unsigned>(id), name, gLoadCount[id]);
     return 0;
 }
 
 int APS5_VABI sceSysmoduleUnloadModule(std::uint16_t id) {
+    const char* name = findModuleName(id);
     if (id == 0) {
+        APS5_DIAG_LOG(error, "sysmodule", "unload_module id=0 invalid");
         return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
-    if (!findModuleName(id)) {
+    if (!name) {
+        APS5_DIAG_LOG(warn, "sysmodule",
+            "unload_module id=%u (0x%x) unknown; not in kModuleTable",
+            static_cast<unsigned>(id), static_cast<unsigned>(id));
         APS5_LOG_OUT("unknown id: %u", static_cast<unsigned>(id));
         return 0;
     }
+    APS5_DIAG_LOG(info, "sysmodule",
+        "unload_module id=%u (0x%x) name=%s",
+        static_cast<unsigned>(id), static_cast<unsigned>(id), name);
     std::lock_guard<std::mutex> lock(gMutex);
     auto it = gLoadCount.find(id);
     if (it == gLoadCount.end() || it->second < 1) {
+        APS5_DIAG_LOG(warn, "sysmodule",
+            "unload_module id=%u (0x%x) name=%s not loaded",
+            static_cast<unsigned>(id), static_cast<unsigned>(id), name);
         return SCE_SYSMODULE_ERROR_UNLOADED;
     }
     it->second--;
+    APS5_DIAG_LOG(info, "sysmodule",
+        "unload_module id=%u (0x%x) name=%s result=0 load_count=%d",
+        static_cast<unsigned>(id), static_cast<unsigned>(id), name, it->second);
     return 0;
 }
 
 int APS5_VABI sceSysmoduleLoadModuleInternal(std::uint32_t id) {
+    const char* name = findModuleName(id);
     if ((id & 0x7fffffffu) == 0) {
+        APS5_DIAG_LOG(error, "sysmodule", "load_module_internal id=0 invalid");
         return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
-    if (!findModuleName(id)) {
+    if (!name) {
+        APS5_DIAG_LOG(warn, "sysmodule",
+            "load_module_internal id=%u (0x%x) unknown; not in kModuleTable",
+            static_cast<unsigned>(id), static_cast<unsigned>(id));
         throw std::runtime_error(std::string("sceSysmoduleLoadModuleInternal: unknown id ") + std::to_string(id));
     }
+    APS5_DIAG_LOG(info, "sysmodule",
+        "load_module_internal id=%u (0x%x) name=%s",
+        static_cast<unsigned>(id), static_cast<unsigned>(id), name);
     std::lock_guard<std::mutex> lock(gMutex);
     gLoadCount[id]++;
+    APS5_DIAG_LOG(info, "sysmodule",
+        "load_module_internal id=%u (0x%x) name=%s result=0 load_count=%d",
+        static_cast<unsigned>(id), static_cast<unsigned>(id), name, gLoadCount[id]);
     return 0;
 }
 
 int APS5_VABI sceSysmoduleUnloadModuleInternal(std::uint32_t id) {
+    const char* name = findModuleName(id);
     if ((id & 0x7fffffffu) == 0) {
+        APS5_DIAG_LOG(error, "sysmodule", "unload_module_internal id=0 invalid");
         return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
-    if (!findModuleName(id)) {
+    if (!name) {
+        APS5_DIAG_LOG(warn, "sysmodule",
+            "unload_module_internal id=%u (0x%x) unknown; not in kModuleTable",
+            static_cast<unsigned>(id), static_cast<unsigned>(id));
         throw std::runtime_error(std::string("sceSysmoduleUnloadModuleInternal: unknown id ") + std::to_string(id));
     }
+    APS5_DIAG_LOG(info, "sysmodule",
+        "unload_module_internal id=%u (0x%x) name=%s",
+        static_cast<unsigned>(id), static_cast<unsigned>(id), name);
     std::lock_guard<std::mutex> lock(gMutex);
     auto it = gLoadCount.find(id);
     if (it == gLoadCount.end() || it->second < 1) {
+        APS5_DIAG_LOG(warn, "sysmodule",
+            "unload_module_internal id=%u (0x%x) name=%s not loaded",
+            static_cast<unsigned>(id), static_cast<unsigned>(id), name);
         return SCE_SYSMODULE_ERROR_UNLOADED;
     }
     it->second--;
+    APS5_DIAG_LOG(info, "sysmodule",
+        "unload_module_internal id=%u (0x%x) name=%s result=0 load_count=%d",
+        static_cast<unsigned>(id), static_cast<unsigned>(id), name, it->second);
     return 0;
 }
 
 int APS5_VABI sceSysmoduleIsLoadedInternal(std::uint32_t id) {
+    const char* name = findModuleName(id);
     if ((id & 0x7fffffffu) == 0) {
+        APS5_DIAG_LOG(error, "sysmodule", "is_loaded_internal id=0 invalid");
         return SCE_SYSMODULE_ERROR_INVALID_VALUE;
     }
-    if (!findModuleName(id)) {
+    if (!name) {
+        APS5_DIAG_LOG(warn, "sysmodule",
+            "is_loaded_internal id=%u (0x%x) unknown; not in kModuleTable",
+            static_cast<unsigned>(id), static_cast<unsigned>(id));
         throw std::runtime_error(std::string("sceSysmoduleIsLoadedInternal: unknown id ") + std::to_string(id));
     }
     std::lock_guard<std::mutex> lock(gMutex);
     const auto it = gLoadCount.find(id);
-    if (it == gLoadCount.end() || it->second < 1) {
+    bool loaded = it != gLoadCount.end() && it->second >= 1;
+    APS5_DIAG_LOG(info, "sysmodule",
+        "is_loaded_internal id=%u (0x%x) name=%s loaded=%d",
+        static_cast<unsigned>(id), static_cast<unsigned>(id), name, loaded ? 1 : 0);
+    if (!loaded) {
         return SCE_SYSMODULE_ERROR_UNLOADED;
     }
     return 0;

@@ -33,10 +33,9 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/AppArchive.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
+#include "prx/libc/include/general/DiagnosticLog.hpp"
 
 namespace {
-// Guest prefixes (without leading slashes) mapped to host directories, e.g. save-data mount points:
-// the PS5 hands the title a short mount point ("/savedata0") whose files live under _sd/<dir name>.
 struct PathAliases {
     std::mutex mutex;
     std::vector<std::pair<std::string, std::string>> entries;
@@ -675,6 +674,7 @@ extern "C" int DuplicateHostDescriptor_nid_no_patch(int descriptor) {
 #endif
 
 extern "C" [[noreturn]] void NotImplemented_nid_no_patch(const char* funcName) {
+    APS5_DIAG_LOG(error, "stub", "not_implemented func=%s", funcName);
     std::fprintf(stdout, "[stub] %s not implemented\n", funcName);
     std::fflush(stdout);
     throw std::runtime_error(std::string(funcName) + " not implemented");

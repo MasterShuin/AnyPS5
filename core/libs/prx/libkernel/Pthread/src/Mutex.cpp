@@ -2,6 +2,7 @@
 #include "../include/Mutex.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
+#include "prx/libc/include/general/DiagnosticLog.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -155,11 +156,14 @@ int APS5_VABI scePthreadMutexInit(PthreadMutex* mutex, const PthreadMutexattr* a
         replacement->_type = (*attr)->type;
     std::lock_guard lock(initializationMutex);
     std::atomic_ref<PthreadMutex>(*mutex).store(replacement.release(), std::memory_order_release);
+    APS5_DIAG_LOG(info, "mutex", "init mutex=%p type=%d result=0",
+        static_cast<void*>(*mutex), static_cast<int>((*mutex)->_type));
     return 0;
 }
 
 int APS5_VABI scePthreadMutexDestroy(PthreadMutex* mutex) {
     if (!mutex)
+    APS5_DIAG_LOG(info, "mutex", "destroy mutex=%p result=0", static_cast<void*>(*mutex));
         throw std::invalid_argument("Mutex pointer is null");
     std::lock_guard lock(initializationMutex);
     if (*mutex == destroyedMutex())
@@ -170,14 +174,19 @@ int APS5_VABI scePthreadMutexDestroy(PthreadMutex* mutex) {
     }
     if (*mutex && (*mutex)->_owner.load(std::memory_order_acquire) != std::thread::id{})
         return SCE_KERNEL_ERROR_EBUSY;
+    const auto condemned = static_cast<void*>(*mutex);
     delete *mutex;
     std::atomic_ref<PthreadMutex>(*mutex).store(destroyedMutex(), std::memory_order_release);
+    APS5_DIAG_LOG(info, "mutex", "destroy mutex=%p result=0", condemned);
     return 0;
 }
 
 int APS5_VABI scePthreadMutexLock(PthreadMutex* mutex) {
     auto* current = resolveMutex(mutex, true);
-    return acquireMutex(current, [current](auto& native) {
+    const void* caller = __builtin_return_address(0);
+    APS5_DIAG_LOG(debug, "mutex", "lock_begin mutex=%p caller=%p", static_cast<void*>(current), caller);
+    const auto lockStart = std::chrono::steady_clock::now();
+    const int result = acquireMutex(current, [current](auto& native) {
 #ifdef _WIN32
         return TimedWait::ParkAcquire(current, [&] { return native.try_lock(); }, nullptr);
 #else
@@ -186,6 +195,13 @@ int APS5_VABI scePthreadMutexLock(PthreadMutex* mutex) {
         return true;
 #endif
     }, 0, false);
+    const auto lockNanos = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - lockStart).count();
+    APS5_DIAG_LOG(debug, "mutex", "lock_end mutex=%p result=%d caller=%p", static_cast<void*>(current), result, caller);
+    if (lockNanos >= 500000000) {
+        APS5_DIAG_LOG(warn, "mutex", "slow_lock mutex=%p result=%d duration_ms=%lld caller=%p",
+            static_cast<void*>(current), result, static_cast<long long>(lockNanos / 1000000), caller);
+    }
+    return result;
 }
 
 int APS5_VABI scePthreadMutexUnlock(PthreadMutex* mutex) {
@@ -209,19 +225,31 @@ int APS5_VABI scePthreadMutexUnlock(PthreadMutex* mutex) {
 #else
     static_cast<void>(released);
 #endif
+    APS5_DIAG_LOG(debug, "mutex", "unlock mutex=%p released=%d result=0",
+        static_cast<void*>(current), released ? 1 : 0);
     return 0;
 }
 
 int APS5_VABI scePthreadMutexTimedlock(PthreadMutex* mutex, KernelUseconds usec) {
     const auto deadline = TimedWait::DeadlineNanos(usec);
     auto* current = resolveMutex(mutex, true);
-    return acquireMutex(current, [=](auto& native) {
+    const void* caller = __builtin_return_address(0);
+    APS5_DIAG_LOG(debug, "mutex", "timedlock_begin mutex=%p usec=%llu caller=%p",
+        static_cast<void*>(current), static_cast<unsigned long long>(usec), caller);
+    const int result = acquireMutex(current, [=](auto& native) {
         return TimedWait::AcquireUntil(current, deadline, [&] { return native.try_lock(); }, [&](std::uint64_t micros) { return native.try_lock_for(std::chrono::microseconds(micros)); });
     }, sceTimedOut, false);
+    APS5_DIAG_LOG(debug, "mutex", "timedlock_end mutex=%p result=0x%x caller=%p",
+        static_cast<void*>(current), static_cast<unsigned>(result), caller);
+    return result;
 }
 
 int APS5_VABI scePthreadMutexTrylock(PthreadMutex* mutex) {
-    return acquireMutex(resolveMutex(mutex, true), [](auto& native) { return native.try_lock(); }, sceBusy, true);
+    auto* current = resolveMutex(mutex, true);
+    const int result = acquireMutex(current, [](auto& native) { return native.try_lock(); }, sceBusy, true);
+    APS5_DIAG_LOG(debug, "mutex", "trylock mutex=%p result=0x%x", static_cast<void*>(current),
+        static_cast<unsigned>(result));
+    return result;
 }
 
 }

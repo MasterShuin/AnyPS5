@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <cstdio>
 #include <cstdlib>
+#include "prx/libc/include/general/DiagnosticLog.hpp"
 
 static constexpr int SCE_OK = 0;
 static constexpr int SCE_KERNEL_ERROR_EPERM = 0x80020001;
@@ -143,6 +144,8 @@ int APS5_VABI sceKernelCreateEventFlag(KernelEventFlag* ef, const char* name, ui
     }
     *ef = flag.get();
     if (TraceSync()) std::fprintf(stderr, "[evf] create %p '%s' attr=0x%x init=0x%llx\n", static_cast<void*>(flag.get()), name, attr, static_cast<unsigned long long>(init_pattern));
+    APS5_DIAG_LOG(info, "evf", "create ef=%p name='%s' attr=0x%x init=0x%llx result=OK",
+        static_cast<void*>(flag.get()), name, attr, static_cast<unsigned long long>(init_pattern));
     return SCE_OK;
 }
 
@@ -155,6 +158,8 @@ int APS5_VABI sceKernelDeleteEventFlag(KernelEventFlag ef) {
     ef->_deleted = true;
     ef->_changed.NotifyAll();
     ef->_changed.Wait(lock, [&] { return ef->_waiters == 0; });
+    APS5_DIAG_LOG(info, "evf", "delete ef=%p name='%s' result=OK",
+        static_cast<void*>(ef), keepAlive->_name.c_str());
     lock.unlock();
     RetireEventFlag(ef, keepAlive);
     return SCE_OK;
@@ -168,6 +173,8 @@ int APS5_VABI sceKernelSetEventFlag(KernelEventFlag ef, uint64_t bit_pattern) {
     if (ef->_deleted) return SCE_KERNEL_ERROR_ESRCH;
     ef->_pattern |= bit_pattern;
     if (TraceSync()) std::fprintf(stderr, "[evf] set %p '%s' |=0x%llx -> 0x%llx\n", static_cast<void*>(ef), ef->_name.c_str(), static_cast<unsigned long long>(bit_pattern), static_cast<unsigned long long>(ef->_pattern));
+    APS5_DIAG_LOG(info, "evf", "set ef=%p name='%s' bits=0x%llx have=0x%llx result=OK",
+        static_cast<void*>(ef), ef->_name.c_str(), static_cast<unsigned long long>(bit_pattern), static_cast<unsigned long long>(ef->_pattern));
     for (auto* waiter = ef->_waiterHead; waiter != nullptr; waiter = waiter->next) {
         if (!waiter->satisfied && IsSatisfied(ef->_pattern, waiter->bitPattern, waiter->waitMode)) {
             waiter->satisfied = true;
@@ -236,6 +243,9 @@ int APS5_VABI sceKernelWaitEventFlag(KernelEventFlag ef, uint64_t bit_pattern, u
     }
     const uint64_t generation = ef->_cancelGeneration;
     if (TraceSync()) std::fprintf(stderr, "[evf] wait %p '%s' want=0x%llx mode=0x%x have=0x%llx timeout=%d caller=%p outer=%p\n", static_cast<void*>(ef), ef->_name.c_str(), static_cast<unsigned long long>(bit_pattern), wait_mode, static_cast<unsigned long long>(ef->_pattern), timeout ? static_cast<int>(*timeout) : -1, __builtin_return_address(0), static_cast<void**>(static_cast<void**>(__builtin_frame_address(0))[0])[1]);
+    APS5_DIAG_LOG(info, "evf", "wait_begin ef=%p name='%s' want=0x%llx mode=0x%x have=0x%llx timeout=%d caller=%p",
+        static_cast<void*>(ef), ef->_name.c_str(), static_cast<unsigned long long>(bit_pattern), wait_mode,
+        static_cast<unsigned long long>(ef->_pattern), timeout ? static_cast<int>(*timeout) : -1, __builtin_return_address(0));
     ++ef->_waiters;
     WaiterNode waiter;
     waiter.bitPattern = bit_pattern;
@@ -262,17 +272,25 @@ int APS5_VABI sceKernelWaitEventFlag(KernelEventFlag ef, uint64_t bit_pattern, u
     }
     KernelTraceWait_nid_postfix("evf", __builtin_return_address(0), static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - waitStart).count()), timedOut);
     if (ef->_deleted) {
+        APS5_DIAG_LOG(warn, "evf", "wait_end ef=%p name='%s' result=EACCES",
+            static_cast<void*>(ef), ef->_name.c_str());
         return SCE_KERNEL_ERROR_EACCES;
     }
     if (ef->_cancelGeneration != generation) {
         if (result_pat) *result_pat = ef->_pattern;
+        APS5_DIAG_LOG(warn, "evf", "wait_end ef=%p name='%s' result=ECANCELED",
+            static_cast<void*>(ef), ef->_name.c_str());
         return SCE_KERNEL_ERROR_ECANCELED;
     }
     if (timedOut && !waiter.satisfied) {
         if (result_pat) *result_pat = ef->_pattern;
+        APS5_DIAG_LOG(warn, "evf", "wait_end ef=%p name='%s' result=ETIMEDOUT",
+            static_cast<void*>(ef), ef->_name.c_str());
         return SCE_KERNEL_ERROR_ETIMEDOUT;
     }
     if (result_pat) *result_pat = waiter.resultPattern;
+    APS5_DIAG_LOG(info, "evf", "wait_end ef=%p name='%s' result=OK result_pat=0x%llx",
+        static_cast<void*>(ef), ef->_name.c_str(), static_cast<unsigned long long>(waiter.resultPattern));
     return SCE_OK;
 }
 

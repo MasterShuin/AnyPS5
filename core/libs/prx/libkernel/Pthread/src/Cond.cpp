@@ -7,6 +7,7 @@
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
+#include "prx/libc/include/general/DiagnosticLog.hpp"
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -95,6 +96,17 @@ int waitUntil(std::shared_ptr<TimedWait::Condition> condition, PthreadMutex* mut
         const void* caller; const bool& timedOut; std::chrono::steady_clock::time_point start;
         ~Trace() { KernelTraceWait_nid_postfix("cond", caller, static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count()), timedOut); }
     } trace{caller, timedOut, waitStart};
+    APS5_DIAG_LOG(debug, "cond", "wait_begin cond=%p mutex=%p timed=%d caller=%p",
+        static_cast<void*>(condition.get()), static_cast<void*>(m), deadlineNanos ? 1 : 0, caller);
+    const auto logWaitEnd = [&] {
+        const auto waitNanos = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - waitStart).count();
+        APS5_DIAG_LOG(debug, "cond", "wait_end cond=%p timed_out=%d duration_ms=%lld caller=%p",
+            static_cast<void*>(condition.get()), timedOut ? 1 : 0, static_cast<long long>(waitNanos / 1000000), caller);
+        if (waitNanos >= 500000000) {
+            APS5_DIAG_LOG(warn, "cond", "slow_wait cond=%p timed_out=%d duration_ms=%lld caller=%p",
+                static_cast<void*>(condition.get()), timedOut ? 1 : 0, static_cast<long long>(waitNanos / 1000000), caller);
+        }
+    };
     if (m->_type == MutexType::Recursive) {
         WakingLock<std::recursive_timed_mutex> waking{m, m->_rmtx};
         std::unique_lock lock(waking, std::adopt_lock);
@@ -109,6 +121,7 @@ int waitUntil(std::shared_ptr<TimedWait::Condition> condition, PthreadMutex* mut
         m->_owner.store(std::this_thread::get_id(), std::memory_order_release);
         m->_count = previousCount;
         lock.release();
+        logWaitEnd();
         return finishWait(condition, timedOut);
     }
     WakingLock<std::timed_mutex> waking{m, m->_mtx};
@@ -117,6 +130,7 @@ int waitUntil(std::shared_ptr<TimedWait::Condition> condition, PthreadMutex* mut
     timedOut = !ThreadCancel::Wait(*condition, lock, deadlineNanos);
     m->_owner.store(std::this_thread::get_id(), std::memory_order_release);
     lock.release();
+    logWaitEnd();
     return finishWait(condition, timedOut);
 }
 
@@ -163,6 +177,8 @@ int APS5_VABI scePthreadCondInit(PthreadCond* cond, const PthreadCondattr* attr,
         replacement->_clockid = (*attr)->_clockid;
     std::lock_guard lock(condInitializationMutex);
     std::atomic_ref<PthreadCond>(*cond).store(replacement.release(), std::memory_order_release);
+    APS5_DIAG_LOG(info, "cond", "init cond=%p clock=%d result=0",
+        static_cast<void*>(*cond), replacement->_clockid);
     return 0;
 }
 
