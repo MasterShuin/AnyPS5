@@ -169,6 +169,13 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
                 std::find(guestModules[index].Names.begin(), guestModules[index].Names.end(), import.Library) != guestModules[index].Names.end();
             if (import.Library.empty() || name == library || guestName) order.push_back(CheckedRva(index));
         }
+        if (library == "libc.prx") {
+            for (std::size_t index = guestModules.size(); index < libraries.size(); ++index) {
+                const auto rva = CheckedRva(index);
+                if (std::find(order.begin(), order.end(), rva) == order.end())
+                    order.push_back(rva);
+            }
+        }
         if (order.empty()) throw Domain::RelinkerException("Import module is not a dependency: " + import.Library);
         const bool hostModule = !import.Library.empty() &&
             std::any_of(order.begin(), order.end(), [&](auto index) { return index >= guestModules.size(); });

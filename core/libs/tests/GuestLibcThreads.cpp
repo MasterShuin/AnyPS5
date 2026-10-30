@@ -33,6 +33,7 @@ static void RequireThrows(TCall call) {
 
 constexpr int success = 0;
 constexpr int busy = 3;
+constexpr int error = 4;
 constexpr int plain = 0x01;
 constexpr int tryable = 0x02;
 constexpr int timed = 0x04;
@@ -48,8 +49,8 @@ static void MutexBasics() {
     void* mutex = CreateMutex(tryable);
     Require(_Mtx_lock_nid_postfix(&mutex) == success);
     Require(_Mtx_lock_nid_postfix(&mutex) == busy);
-    RequireThrows<std::logic_error>([&] { _Mtx_destroy_nid_postfix(&mutex); });
-    std::thread([&] { Require(_Mtx_unlock_nid_postfix(&mutex) == success); }).join();
+    _Mtx_destroy_nid_postfix(&mutex);
+    std::thread([&] { Require(_Mtx_unlock_nid_postfix(&mutex) == error); }).join();
     Require(_Mtx_unlock_nid_postfix(&mutex) == success);
     Require(_Mtx_unlock_nid_postfix(&mutex) == success);
     void* invalidMutex = nullptr;

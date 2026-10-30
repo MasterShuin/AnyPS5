@@ -939,9 +939,10 @@ void APS5_VABI _ZNSt4_PadC2Ev_nid_postfix(GuestPad* pad) {
 
 void APS5_VABI _ZNSt4_PadD2Ev_nid_postfix(GuestPad* pad) {
     if (!pad) APS5_INVALID_ARG_EX;
-    RequireThrd(_Mtx_unlock_nid_postfix(&pad->mutex), "_Pad::~_Pad: _Mtx_unlock");
-    _Mtx_destroy_nid_postfix(&pad->mutex);
-    _Cnd_destroy_nid_postfix(&pad->condition);
+    if (_Mtx_unlock_nid_postfix(&pad->mutex) == ThrdSuccess) {
+        _Mtx_destroy_nid_postfix(&pad->mutex);
+        _Cnd_destroy_nid_postfix(&pad->condition);
+    }
 }
 
 int APS5_VABI _Thrd_id_nid_postfix(void) {

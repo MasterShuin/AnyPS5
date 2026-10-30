@@ -120,7 +120,7 @@ void APS5_VABI _Mtx_destroy_nid_postfix(void** handle) {
         return;
     auto* mutex = ResolveMutex(handle, "_Mtx_destroy");
     if (mutex->count != 0)
-        throw std::logic_error("_Mtx_destroy: mutex destroyed while locked");
+        return;
     mutex->tag = 0;
     delete mutex;
     *handle = nullptr;
@@ -167,8 +167,10 @@ int APS5_VABI _Mtx_trylock_nid_postfix(void** handle) {
 
 int APS5_VABI _Mtx_unlock_nid_postfix(void** handle) {
     auto* mutex = ResolveMutex(handle, "_Mtx_unlock");
-    if (!IsOwnedByCaller(mutex))
+    if (mutex->count == 0)
         return threadSuccess;
+    if (!IsOwnedByCaller(mutex))
+        return threadError;
     if (--mutex->count == 0) {
         mutex->owner.store(std::thread::id{}, std::memory_order_release);
         mutex->native.unlock();

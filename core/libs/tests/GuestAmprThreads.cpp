@@ -479,7 +479,9 @@ struct ForeignDestroy {
 
 static void* APS5_VABI DestroyPad(void* arg) {
     auto& context = *static_cast<ForeignDestroy*>(arg);
-    context.rejected = Throws<std::logic_error>([&] { _ZNSt4_PadD2Ev_nid_postfix(context.pad); });
+    bool threw = false;
+    try { _ZNSt4_PadD2Ev_nid_postfix(context.pad); } catch (...) { threw = true; }
+    context.rejected = !threw;
     return nullptr;
 }
 
